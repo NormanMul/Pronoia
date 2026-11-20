@@ -2,5 +2,15 @@
   "name": "@pronoia/cli",
   "version": "0.1.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "bin": {
+    "pronoia": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@pronoia/core": "*",
+    "commander": "15.1.0"
+  }
 }

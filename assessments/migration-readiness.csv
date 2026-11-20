@@ -1,0 +1,11 @@
+test_id,category,title,description,procedure,expected_result,severity,evidence_required,owner_role,references
+MR01,Inventory,Application inventory,Northwind inventories a fictional workload,Review the synthetic component inventory,Owners and dependencies are documented,medium,true,Application owner,
+MR02,Data,Data mapping,Northwind maps a fictional data model,Compare synthetic source and target fields,Required fields have an explicit mapping,high,true,Data owner,
+MR03,Compatibility,Runtime compatibility,Northwind verifies a fictional runtime,Run a synthetic compatibility check,Supported target runtimes are identified,high,true,Application owner,
+MR04,Integration,Integration contracts,Northwind documents fictional interfaces,Review synthetic API contracts,Interface behavior and owners are documented,medium,true,Integration owner,
+MR05,Performance,Performance baseline,Northwind measures a fictional workload,Run a synthetic load baseline,Baseline and acceptance thresholds are recorded,medium,true,Application owner,
+MR06,Resilience,Recovery planning,Northwind plans fictional recovery,Walk through a synthetic recovery plan,Recovery objectives are documented,high,true,Resilience owner,
+MR07,Operations,Observability readiness,Northwind monitors a fictional workload,Generate a synthetic health event,The event and alert reach the demo operator,medium,true,Monitoring owner,
+MR08,Cutover,Cutover rehearsal,Northwind rehearses a fictional cutover,Run a synthetic cutover checklist,Owners timings and acceptance checks are recorded,high,true,Migration owner,
+MR09,Cutover,Rollback rehearsal,Northwind rehearses fictional rollback,Run a synthetic rollback exercise,The previous state is restored and checked,high,true,Migration owner,
+MR10,Documentation,Handover readiness,Northwind prepares fictional handover,Review the synthetic operator documentation,Runbook ownership and support are clear,low,true,Migration owner,

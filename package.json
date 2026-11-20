@@ -13,9 +13,14 @@
   "scripts": {
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
-    "build": "npm run build --workspaces --if-present"
+    "pretest": "npm run build",
+    "pretest:coverage": "npm run build",
+    "typecheck": "npm run build -w @pronoia/core && tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "build": "npm run build -w @pronoia/core && npm run build -w @pronoia/cli",
+    "pronoia": "node packages/cli/dist/index.js",
+    "demo:seed": "node packages/cli/dist/index.js demo-seed"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

@@ -1,0 +1,47 @@
+name: Assessment item
+description: A manual assessment test; humans validate the result.
+title: '[Assessment] '
+labels:
+  [
+    pronoia,
+    'status:todo',
+    'severity:medium',
+    'source:manual',
+    'assessment:manual',
+  ]
+body:
+  - type: markdown
+    attributes:
+      value: Synthetic data only in this public repository. Use comment commands; never close to approve.
+  - type: textarea
+    id: test
+    attributes:
+      label: Test
+      description: Describe what is being checked.
+    validations:
+      required: true
+  - type: textarea
+    id: procedure
+    attributes:
+      label: Procedure
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Publish reviewed PNG evidence via the CLI or desktop.
+  - type: textarea
+    id: remediation
+    attributes:
+      label: Remediation

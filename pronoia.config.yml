@@ -1,0 +1,29 @@
+board_repo: NormanMul/Pronoia
+timezone: Asia/Jakarta
+governance:
+  four_eyes: true
+  allow_self_approve: false
+  evidence_required_for_approve: true
+  automation_logins: []
+targets:
+  - repo: NormanMul/Pronoia
+    assessment: Code Security - Contoso Apps
+priority:
+  p1_cvss: 9
+  p1_epss: 0.5
+  p2_cvss: 7
+  p2_epss: 0.1
+  p3_cvss: 4
+sla_days:
+  p1: 7
+  p2: 14
+  p3: 30
+  p4: 90
+budgets:
+  max_analyses_per_min: 3
+  max_images_per_session: 60
+retention_days: 30
+keep_audio: false
+auto_dismiss: false
+export:
+  dir: exports

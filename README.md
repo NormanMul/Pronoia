@@ -5,9 +5,9 @@ the authoritative assessment board and comment commands provide the audit trail.
 
 ## Implementation status
 
-M0 establishes the npm workspaces, strict TypeScript, formatting, linting, tests
-and SHA-pinned CI. Application features are implemented in the following
-milestones; the scaffold alone does not capture audio or change assessment items.
+The workspaces, governed board engine, CLI, comment workflow and behavior tests
+are implemented. Desktop, scanning and reporting features follow in the remaining
+milestones. Audio capture is not part of the board milestone.
 
 | Milestone | Deliverable                                                   |
 | --------- | ------------------------------------------------------------- |
@@ -30,8 +30,37 @@ npm run lint && npm run typecheck && npm test
 npm run build
 ```
 
-M0 intentionally has no application tests or application build targets. Both
-become mandatory when the workflow engine is implemented in M1.
+Tests and builds are mandatory. Core coverage requires at least 80% lines,
+statements, functions and branches.
+
+## Board quick start
+
+```sh
+npm run build
+npm run pronoia -- setup
+npm run pronoia -- import assessments/security-readiness.csv --assessment "Security Readiness - Contoso" --synthetic
+```
+
+Repeat the import to verify idempotence. Preview without credentials or GitHub
+writes using `npm run demo:seed -- --dry-run`. Other templates cover firewall,
+code-vulnerability and migration-readiness assessments.
+
+Post `/start`, then `/validate <what was tested>`. A different, uninvolved human
+posts `/approve` after reviewing evidence; `/reject <reason>` sends the item
+back to In Progress. GitHub Actions are authoritative, and manual closures or
+status edits are repaired by the guard. Approval from To Do, missing reasons,
+bot approvals and self approvals are refused with an explanation.
+
+Publish only reviewed synthetic images to this public repo:
+
+```sh
+npm run pronoia -- evidence add --issue 1 --file shot.png --note "Synthetic demo evidence" --reviewed --synthetic
+npm run pronoia -- comment --issue 1 --body "/validate verified in the demo"
+```
+
+Agents add `--agent scout` or set `PRONOIA_AGENT_NAME`. Human-only commands are
+refused even when the agent uses a human token. `/ai` and `/copilot` require the
+security/Foundry milestone and are not enabled by the board scaffold alone.
 
 ## Safety
 

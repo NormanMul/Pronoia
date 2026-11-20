@@ -1,0 +1,11 @@
+test_id,category,title,description,procedure,expected_result,severity,evidence_required,owner_role,references
+FW01,Rules,Approved ingress,Fabrikam allows a documented demo source,Test the approved synthetic source,The connection succeeds,high,true,Network owner,
+FW02,Rules,Denied ingress,Fabrikam denies an unapproved demo source,Test the unapproved synthetic source,The connection is denied,high,true,Network owner,
+FW03,Rules,Outbound allowlist,Fabrikam restricts demo egress,Test approved and unapproved demo destinations,Only approved destinations are reachable,high,true,Network owner,
+FW04,Segmentation,Tier isolation,Fabrikam isolates demo tiers,Test a prohibited synthetic tier-to-tier path,The prohibited path is denied,high,true,Network owner,
+FW05,Administration,Management isolation,Fabrikam limits demo admin access,Test synthetic admin access from two zones,Only the admin zone succeeds,critical,true,Network owner,
+FW06,Logging,Deny event logging,Fabrikam logs denied demo traffic,Generate a benign denied connection,The expected log is searchable,medium,true,Monitoring owner,
+FW07,Operations,Rule ownership,Fabrikam assigns owners to demo rules,Review the synthetic rule list,All rules have an owner,medium,true,Network owner,
+FW08,Operations,Expiry review,Fabrikam expires temporary demo rules,Inspect a synthetic temporary rule,An expiry and review date exist,medium,true,Network owner,
+FW09,Resilience,Policy failover,Fabrikam preserves a demo policy on failover,Run a synthetic failover exercise,Expected allow and deny behavior is unchanged,high,true,Resilience owner,
+FW10,Operations,Policy backup,Fabrikam can restore demo rules,Restore a synthetic policy backup,Policy integrity is verified,medium,true,Network owner,

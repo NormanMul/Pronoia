@@ -11,7 +11,9 @@ import {
   type WorkflowState,
 } from './schemas.js';
 
-export class CommandError extends Error {}
+export class CommandError extends Error {
+  readonly name = 'CommandError';
+}
 
 export function isAuditWriter(login: string): boolean {
   return login.toLowerCase() === 'github-actions[bot]';
@@ -177,9 +179,15 @@ export function authorize(
   config: Config,
 ): void {
   if (!['OWNER', 'MEMBER', 'COLLABORATOR'].includes(actor.association)) {
-    throw new CommandError(
-      'Only an owner, member or collaborator may use commands.',
-    );
+    if (
+      !isAuditWriter(actor.login) ||
+      actor.userType !== 'Bot' ||
+      !agentCommands.has(command.name)
+    ) {
+      throw new CommandError(
+        'Only an owner, member or collaborator may use commands.',
+      );
+    }
   }
   if (
     actorType(actor, config) !== 'human' &&

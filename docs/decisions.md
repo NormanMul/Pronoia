@@ -84,3 +84,32 @@ false`. Only `github-actions[bot]` may author authoritative audit/result
   bounded zlib inflation with chunk and scanline validation.
 - Reason: timeout-shaped configuration and PNG-shaped byte markers alone do
   not establish working deadlines or valid image payloads.
+
+## ADR 010: Direct model SDK and compatible patched tests
+
+- Status: implemented, 2026-11-20; live endpoint configuration is separate.
+- Decision: pin OpenAI 7.56.0 for the direct v1 Responses/audio APIs,
+  `@azure/identity` 4.14.1 for refreshable Entra authentication, and ws 8.23.0
+  for the SDK's main-process realtime peer. `@types/ws` is development-only.
+  SDKs load on use so normal board commands retain their lightweight startup.
+- Reason: no hosted Foundry Agents, provisioning layer or replacement runtime
+  is needed. These are the explicitly requested runtime dependencies.
+- Test tooling: replace scaffold Vitest/coverage 4.0.18 with compatible stable
+  5.1.0, whose Node engines accept the existing Node 22 runtime. Existing tests
+  and all four 80% core coverage thresholds remain intact.
+
+## ADR 011: Shared authority for asynchronous source work
+
+- Status: implemented, 2026-11-20.
+- Decision: discovery creates initial To Do issues and queues validated SARIF
+  snapshots, never changing existing statuses. Explicit `workflow_dispatch`
+  routes security/merge work to the reusable commands workflow, sharing the
+  same numeric issue lock with human comments and AI. Every worker also checks
+  current source work after draining comments, so replacement pending jobs do
+  not discard scanner intent.
+- Reason: ordinary GITHUB_TOKEN comments do not retrigger Actions; explicit
+  dispatch does. Trusted internal restricted bot commands need association NONE
+  support, without changing external ACLs or audit trust.
+- Recovery: transition journal first, idempotent proposal/assignment receipts,
+  persisted assignees, then reconciliation/reaction and completion. Source
+  observations and merge receipts never replace live PR/alert verification.

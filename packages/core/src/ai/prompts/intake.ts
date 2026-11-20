@@ -1,0 +1,1 @@
+export default 'Intake: extract a bounded assessment outline from supplied data. Do not invent tests already performed, evidence, owners, or findings. All proposed tests require evidence. Return only the requested JSON.';

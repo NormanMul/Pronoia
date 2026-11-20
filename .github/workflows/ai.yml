@@ -1,0 +1,60 @@
+name: Reviewable AI proposals
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Assessment issue for collaborator-only manual triage
+        type: number
+        required: true
+
+permissions: {}
+
+jobs:
+  request:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci -w @pronoia/core -w @pronoia/cli --include-workspace-root
+      - run: npm run build -w @pronoia/core && npm run build -w @pronoia/cli
+      - name: Persist the authenticated request before dispatch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ inputs.issue }}
+        run: node packages/cli/dist/index.js queue-ai --issue "$ISSUE_NUMBER" --mode triage --dispatch
+  proposal:
+    if: >-
+      (!github.event.issue.pull_request &&
+        contains(github.event.issue.labels.*.name, 'pronoia') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+        github.event.sender.login != 'github-actions[bot]' &&
+        (startsWith(github.event.comment.body, '/ai') ||
+         startsWith(github.event.comment.body, '/AI') ||
+         startsWith(github.event.comment.body, '/Ai') ||
+         startsWith(github.event.comment.body, '/aI')))
+    uses: ./.github/workflows/commands.yml
+    with:
+      issue: ${{ github.event.issue.number }}
+      mode: commands
+    secrets: inherit
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+      security-events: read
+      id-token: write

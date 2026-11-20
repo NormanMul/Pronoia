@@ -1,0 +1,11 @@
+{
+  "issue": 1,
+  "observed": "Synthetic check has not started.",
+  "result": "unclear",
+  "proposed_command": "/start",
+  "reason": "Start the synthetic assessment.",
+  "remediation": [],
+  "evidence_note": "No evidence observed.",
+  "verbal_decision": { "type": "none", "speaker": "", "quote": "", "at": "" },
+  "confidence": 0.8
+}

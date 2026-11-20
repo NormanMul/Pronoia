@@ -1,0 +1,10 @@
+# Non-executable teaching fixture, deliberately OUTSIDE .github/workflows.
+# The mutable tag is an intentional example of missing supply-chain pinning.
+name: Mutable action demonstration only
+on: workflow_dispatch
+permissions: {}
+jobs:
+  example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4 # Intentionally unpinned; never executes here.

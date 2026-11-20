@@ -1,8 +1,18 @@
 import { Octokit } from 'octokit';
-import { expect, it, vi } from 'vitest';
+import { beforeAll, expect, it, vi } from 'vitest';
 import { Board } from './github.js';
 import { configSchema } from './config.js';
-import { assessmentRows } from './assessment.js';
+import { assessmentRows, marker, metaSchema } from './assessment.js';
+import {
+  FoundryService,
+  createFoundryClient,
+  foundryConfig,
+} from './ai/foundry.js';
+import { readAudit } from './workflow/engine.js';
+import { requestManualAi } from './ai/commands.js';
+import { randomUUID } from 'node:crypto';
+import { rmSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 function fixture() {
   const issue = {
@@ -123,6 +133,17 @@ function fixture() {
       issue.labels = value.labels;
       writes += 1;
       data = value.labels.map((name) => ({ name }));
+    } else if (method === 'POST' && path.endsWith('/issues/1/labels')) {
+      const value = body as { labels: string[] };
+      issue.labels = [...new Set([...issue.labels, ...value.labels])];
+      data = issue.labels.map((name) => ({ name }));
+    } else if (method === 'POST' && path.endsWith('/issues/1/assignees')) {
+      const value = body as { assignees: string[] };
+      issue.assignees = [
+        ...issue.assignees,
+        ...value.assignees.map((login) => ({ login })),
+      ];
+      data = issue;
     } else if (method === 'PATCH' && path.endsWith('/issues/1')) {
       Object.assign(issue, body);
       const update = body as { assignees?: string[] };
@@ -483,4 +504,527 @@ it('updates only the validation section without erasing later human-authored sec
   f.command('/start');
   await f.board.applyCommands(1);
   expect(f.issue.body).toContain('## Extra details\nPreserve this note.');
+});
+
+it('processes internal restricted bot commands with NONE association, never external bot approvals', async () => {
+  const f = fixture();
+  const id = f.command('/start', 'github-actions[bot]');
+  const internal = f.comments.find((comment) => comment.id === id);
+  if (!internal) throw new Error('Missing internal fixture');
+  internal.author_association = 'NONE';
+  internal.user.type = 'Bot';
+  f.command('/approve', 'external[bot]');
+  expect(await f.board.applyCommands(1)).toEqual({ accepted: 1, rejected: 1 });
+  expect(f.issue.labels).toContain('status:in-progress');
+});
+
+it.each(['open', 'dismissed', 'fixed'] as const)(
+  'bypasses automated evidence only with a real merged PR and a live fixed alert (%s)',
+  async (alertState) => {
+    const f = fixture();
+    const target = new Octokit({
+      retry: { enabled: false },
+      throttle: { enabled: false },
+      request: {
+        fetch: async () =>
+          new Response(
+            JSON.stringify({
+              number: 2,
+              state: alertState,
+              created_at: '2026-11-01T12:00:00Z',
+              dependency: {
+                package: { name: 'lodash', ecosystem: 'npm' },
+                manifest_path: 'samples/package-lock.json',
+              },
+              security_advisory: { ghsa_id: 'GHSA-35jh-r3h4-6jhm' },
+              security_vulnerability: {
+                vulnerable_version_range: '<4.17.21',
+                first_patched_version: { identifier: '4.17.21' },
+              },
+            }),
+            { headers: { 'content-type': 'application/json' } },
+          ),
+      },
+    });
+    f.board.integrations.targetApi = target;
+    f.issue.body =
+      marker(
+        'meta',
+        metaSchema.parse({
+          dedupe_key: 'dependabot/contoso/demo/2',
+          source: 'dependabot',
+          assessment: 'Synthetic',
+          test_id: '2',
+          synthetic: true,
+          alert_refs: [
+            { repo: 'Contoso/demo', source: 'dependabot', number: 2 },
+          ],
+        }),
+      ) +
+      '\n\n<!-- claimed-fixed-proof -->\nhttps://github.com/Contoso/demo/pull/9';
+    f.prs.set(9, {
+      user: { login: 'fixer' },
+      merged_at: '2026-11-20T12:00:00Z',
+    });
+    f.command('/validate synthetic test', 'worker');
+    await f.board.applyCommands(1);
+    f.command('/approve', 'independent');
+    const result = await f.board.applyCommands(1);
+    expect(result.accepted).toBe(alertState === 'fixed' ? 1 : 0);
+    expect(f.issue.state).toBe(alertState === 'fixed' ? 'closed' : 'open');
+  },
+);
+
+it('does not use a fixed-alert marker or source status without a real merged PR as approval proof', async () => {
+  const f = fixture();
+  f.issue.body =
+    marker(
+      'meta',
+      metaSchema.parse({
+        dedupe_key: 'sarif/contoso/demo/demo',
+        source: 'sarif',
+        assessment: 'Synthetic',
+        test_id: 'demo',
+        synthetic: true,
+      }),
+    ) + '\n<!-- pronoia:internal-command {"alert_fixed_observed":true} -->';
+  f.command('/validate tested', 'worker');
+  f.command('/approve', 'independent');
+  expect(await f.board.applyCommands(1)).toEqual({ accepted: 1, rejected: 1 });
+  expect(f.issue.state).toBe('open');
+});
+
+it('rejects a malformed PR response instead of treating a missing merged_at field as a merge', async () => {
+  const f = fixture();
+  f.issue.body =
+    marker(
+      'meta',
+      metaSchema.parse({
+        dedupe_key: 'dependabot/contoso/demo/2',
+        source: 'dependabot',
+        assessment: 'Synthetic',
+        test_id: '2',
+        synthetic: true,
+        alert_refs: [{ repo: 'Contoso/demo', source: 'dependabot', number: 2 }],
+      }),
+    ) + '\nhttps://github.com/Contoso/demo/pull/9';
+  const fixed = new Octokit({
+    retry: { enabled: false },
+    throttle: { enabled: false },
+    request: {
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            number: 2,
+            state: 'fixed',
+            created_at: '2026-11-01T12:00:00Z',
+            dependency: {
+              package: { name: 'lodash', ecosystem: 'npm' },
+              manifest_path: 'samples/package-lock.json',
+            },
+            security_advisory: { ghsa_id: 'GHSA-35jh-r3h4-6jhm' },
+            security_vulnerability: {
+              vulnerable_version_range: '<4.17.21',
+              first_patched_version: { identifier: '4.17.21' },
+            },
+          }),
+          { headers: { 'content-type': 'application/json' } },
+        ),
+    },
+  });
+  f.board.integrations.targetApi = fixed;
+  vi.spyOn(f.board.api.rest.pulls, 'get').mockResolvedValue({
+    data: { user: { login: 'fixer' } },
+  } as Awaited<ReturnType<typeof f.board.api.rest.pulls.get>>);
+  f.command('/validate tested', 'worker');
+  await f.board.applyCommands(1);
+  f.command('/approve', 'independent');
+  expect(await f.board.applyCommands(1)).toEqual({ accepted: 0, rejected: 1 });
+  expect(f.issue.state).toBe('open');
+});
+
+it('does not apply statuses when the journal was not written by the authoritative Actions identity', async () => {
+  const f = fixture();
+  f.command('/start');
+  const post = f.board.comment.bind(f.board);
+  vi.spyOn(f.board, 'comment').mockImplementationOnce(async (...args) => ({
+    ...(await post(...args)),
+    user: { login: 'human', type: 'User' },
+  }));
+  await expect(f.board.applyCommands(1)).rejects.toThrow(
+    /authoritative|audit writer/i,
+  );
+  expect(f.issue.labels).toContain('status:todo');
+});
+
+function foundryFixture() {
+  const config = foundryConfig({
+    AZURE_FOUNDRY_ENDPOINT: 'https://synthetic.openai.azure.com',
+    AZURE_AUTH_MODE: 'key',
+    AZURE_FOUNDRY_API_KEY: 'test-only-noncredential',
+    FOUNDRY_CHAT_DEPLOYMENT: 'demo',
+  });
+  if (!config.ok) throw new Error('Invalid Foundry fixture');
+  const service = new FoundryService(
+    createFoundryClient(config.value),
+    config.value,
+  );
+  vi.spyOn(service, 'call').mockResolvedValue({
+    ok: true,
+    value: {
+      summary: 'Synthetic AI proposal.',
+      priority: 'p2',
+      reason: 'Review only.',
+      remediation: ['Add tests.'],
+      references: [],
+      confidence: 0.8,
+    },
+    usage: { input_tokens: 2, output_tokens: 3, total_tokens: 5, calls: 1 },
+    warnings: [],
+  });
+  return service;
+}
+
+beforeAll(() => {
+  foundryFixture();
+}, 30000);
+
+it.each(['triage', 'remediate', 'test-plan', 'summarize'])(
+  'processes human /ai %s as a labelled proposal with journal/result IDs, not a status change',
+  async (mode) => {
+    const f = fixture();
+    const service = foundryFixture();
+    f.board.integrations.foundry = service;
+    const id = f.command(`/ai ${mode}`);
+    expect(await f.board.applyCommands(1)).toEqual({
+      accepted: 1,
+      rejected: 0,
+    });
+    expect(f.issue.labels).toContain('status:todo');
+    expect(f.issue.labels).toContain('ai:proposal');
+    const audit = f.comments
+      .flatMap((comment) => {
+        const audit = readAudit(comment.body, comment.user.login);
+        return audit ? [audit] : [];
+      })
+      .at(-1);
+    expect(audit).toMatchObject({
+      comment_id: id,
+      audit_comment_id: expect.any(Number),
+      effect_comment_id: expect.any(Number),
+    });
+    expect(f.posted.join('\n')).toContain('AI proposal');
+    expect(service.call).toHaveBeenCalledTimes(1);
+  },
+);
+
+it('recovers an interrupted AI proposal without generating or posting it twice', async () => {
+  const f = fixture();
+  const service = foundryFixture();
+  f.board.integrations.foundry = service;
+  f.command('/ai triage');
+  vi.spyOn(f.board.api.rest.issues, 'addLabels').mockRejectedValueOnce(
+    new Error('transient label failure'),
+  );
+  await expect(f.board.applyCommands(1)).rejects.toThrow(
+    'transient label failure',
+  );
+  await f.board.applyCommands(1);
+  expect(service.call).toHaveBeenCalledTimes(1);
+  expect(
+    f.posted.filter((body) => body.includes('pronoia:ai-proposal')),
+  ).toHaveLength(1);
+  expect(f.issue.labels).toContain('ai:proposal');
+});
+
+it('never lets an agent invoke /ai or /copilot, even with a human token marker', async () => {
+  const f = fixture();
+  const service = foundryFixture();
+  f.board.integrations.foundry = service;
+  f.command(
+    '/ai triage',
+    'reviewer',
+    '\n<!-- pronoia:agent {"agent":"scout"} -->',
+  );
+  f.command(
+    '/copilot',
+    'reviewer',
+    '\n<!-- pronoia:agent {"agent":"scout"} -->',
+  );
+  expect(await f.board.applyCommands(1)).toEqual({ accepted: 0, rejected: 2 });
+  expect(service.call).not.toHaveBeenCalled();
+});
+
+it('assigns only the documented Copilot bot with constrained instructions and preserves it on retry', async () => {
+  const f = fixture();
+  f.board.integrations.agentApi = f.board.api;
+  vi.spyOn(f.board.api, 'graphql').mockResolvedValue({
+    repository: {
+      suggestedActors: {
+        nodes: [{ login: 'copilot-swe-agent', __typename: 'Bot' }],
+      },
+    },
+  });
+  const assignment = vi.spyOn(f.board.api.rest.issues, 'addAssignees');
+  f.command('/start', 'worker');
+  await f.board.applyCommands(1);
+  f.command('/copilot', 'requester');
+  vi.spyOn(f.board.api.rest.issues, 'updateComment').mockRejectedValueOnce(
+    new Error('transient audit edit failure'),
+  );
+  await expect(f.board.applyCommands(1)).rejects.toThrow(
+    'transient audit edit failure',
+  );
+  expect(f.issue.assignees).toContainEqual({ login: 'copilot-swe-agent[bot]' });
+  await f.board.applyCommands(1);
+  expect(assignment).toHaveBeenCalledTimes(1);
+  expect(assignment).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assignees: ['copilot-swe-agent[bot]'],
+      agent_assignment: {
+        target_repo: 'Contoso/demo',
+        base_branch: 'main',
+        custom_instructions:
+          'Refs #1, never Fixes/Closes. Add tests. Do not modify workflows.',
+      },
+    }),
+  );
+  expect(f.issue.assignees).toEqual([
+    { login: 'worker' },
+    { login: 'copilot-swe-agent[bot]' },
+  ]);
+  expect(f.issue.labels).toContain('status:in-progress');
+});
+
+it('rejects unsupported Copilot assignment clearly without losing later commands', async () => {
+  const f = fixture();
+  f.board.integrations.agentApi = f.board.api;
+  vi.spyOn(f.board.api, 'graphql').mockResolvedValue({
+    repository: { suggestedActors: { nodes: [] } },
+  });
+  f.command('/copilot');
+  f.command('/start');
+  expect(await f.board.applyCommands(1)).toEqual({ accepted: 1, rejected: 1 });
+  expect(f.posted.join('\n')).toMatch(/Copilot.*unsupported|not enabled/i);
+});
+
+it.each([401, 403, 404, 422])(
+  'completes a terminal Copilot API failure (%s) without poisoning the next command or retry',
+  async (status) => {
+    const f = fixture();
+    f.board.integrations.agentApi = f.board.api;
+    vi.spyOn(f.board.api, 'graphql').mockResolvedValue({
+      repository: {
+        suggestedActors: {
+          nodes: [{ login: 'copilot-swe-agent', __typename: 'Bot' }],
+        },
+      },
+    });
+    const assign = vi
+      .spyOn(f.board.api.rest.issues, 'addAssignees')
+      .mockRejectedValueOnce(
+        Object.assign(new Error('private upstream error'), { status }),
+      );
+    f.command('/copilot');
+    f.command('/start', 'worker');
+    expect(await f.board.applyCommands(1)).toEqual({
+      accepted: 1,
+      rejected: 1,
+    });
+    expect(f.issue.labels).toContain('status:in-progress');
+    expect(f.issue.assignees).toEqual([{ login: 'worker' }]);
+    expect(f.posted.join('\n')).not.toContain('private upstream error');
+    expect(f.posted.join('\n')).toMatch(/Copilot.*unavailable|permission/i);
+    await f.board.applyCommands(1);
+    expect(assign).toHaveBeenCalledTimes(1);
+  },
+);
+
+it('recovers a terminal Copilot receipt even if recording its failure was interrupted', async () => {
+  const f = fixture();
+  f.board.integrations.agentApi = f.board.api;
+  vi.spyOn(f.board.api, 'graphql').mockResolvedValue({
+    repository: {
+      suggestedActors: {
+        nodes: [{ login: 'copilot-swe-agent', __typename: 'Bot' }],
+      },
+    },
+  });
+  const assign = vi
+    .spyOn(f.board.api.rest.issues, 'addAssignees')
+    .mockRejectedValueOnce(
+      Object.assign(new Error('private upstream error'), { status: 403 }),
+    );
+  f.command('/copilot');
+  vi.spyOn(f.board.api.rest.issues, 'updateComment').mockRejectedValueOnce(
+    new Error('interrupted journal edit'),
+  );
+  await expect(f.board.applyCommands(1)).rejects.toThrow(
+    'interrupted journal edit',
+  );
+  await f.board.applyCommands(1);
+  await f.board.applyCommands(1);
+  expect(assign).toHaveBeenCalledTimes(1);
+  expect(f.issue.labels).toContain('status:todo');
+});
+
+it('recovers a confirmed Copilot assignment without needing its removed user token again', async () => {
+  const f = fixture();
+  f.board.integrations.agentApi = f.board.api;
+  vi.spyOn(f.board.api, 'graphql').mockResolvedValue({
+    repository: {
+      suggestedActors: {
+        nodes: [{ login: 'copilot-swe-agent', __typename: 'Bot' }],
+      },
+    },
+  });
+  const assign = vi.spyOn(f.board.api.rest.issues, 'addAssignees');
+  f.command('/copilot');
+  vi.spyOn(f.board.api.rest.issues, 'updateComment').mockRejectedValueOnce(
+    new Error('interrupted journal edit'),
+  );
+  await expect(f.board.applyCommands(1)).rejects.toThrow(
+    'interrupted journal edit',
+  );
+  f.board.integrations.agentApi = undefined;
+  await f.board.applyCommands(1);
+  expect(assign).toHaveBeenCalledTimes(1);
+  expect(f.issue.assignees).toContainEqual({ login: 'copilot-swe-agent[bot]' });
+});
+
+it('does not leave recovery stuck when Copilot becomes unsupported before a task was assigned', async () => {
+  const f = fixture();
+  f.board.integrations.agentApi = f.board.api;
+  const actors = vi.spyOn(f.board.api, 'graphql').mockResolvedValue({
+    repository: {
+      suggestedActors: {
+        nodes: [{ login: 'copilot-swe-agent', __typename: 'Bot' }],
+      },
+    },
+  });
+  vi.spyOn(f.board.api.rest.issues, 'addAssignees').mockRejectedValueOnce(
+    new Error('transient request failure'),
+  );
+  f.command('/copilot');
+  await expect(f.board.applyCommands(1)).rejects.toThrow(
+    'transient request failure',
+  );
+  actors.mockResolvedValue({ repository: { suggestedActors: { nodes: [] } } });
+  f.command('/start', 'worker');
+  await expect(f.board.applyCommands(1)).resolves.toMatchObject({
+    accepted: 1,
+  });
+  expect(f.issue.assignees).toEqual([{ login: 'worker' }]);
+});
+
+it('gates manual AI on the actual Actions event and collaborator API, never an input actor', async () => {
+  const f = fixture();
+  const service = foundryFixture();
+  const eventFile = resolve(`.m2-event-${randomUUID()}.json`);
+  vi.spyOn(
+    f.board.api.rest.repos,
+    'getCollaboratorPermissionLevel',
+  ).mockResolvedValue({ data: { permission: 'write' } } as Awaited<
+    ReturnType<typeof f.board.api.rest.repos.getCollaboratorPermissionLevel>
+  >);
+  vi.spyOn(f.board.api.rest.users, 'getByUsername').mockResolvedValue({
+    data: { login: 'requester', type: 'User' },
+  } as Awaited<ReturnType<typeof f.board.api.rest.users.getByUsername>>);
+  try {
+    writeFileSync(
+      eventFile,
+      JSON.stringify({ sender: { login: 'requester' } }),
+    );
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    vi.stubEnv('GITHUB_EVENT_NAME', 'workflow_dispatch');
+    vi.stubEnv('GITHUB_EVENT_PATH', eventFile);
+    vi.stubEnv('GITHUB_RUN_ID', '12345');
+    const result = await requestManualAi(f.board, service, 1, 'triage');
+    expect(result).toMatchObject({
+      request_comment_id: expect.any(Number),
+      proposal_comment_id: expect.any(Number),
+    });
+    expect(f.issue.labels).toContain('status:todo');
+    expect(
+      f.comments.filter((comment) => comment.body.startsWith('/')),
+    ).toHaveLength(0);
+    await requestManualAi(f.board, service, 1, 'triage');
+    expect(service.call).toHaveBeenCalledTimes(1);
+    vi.mocked(
+      f.board.api.rest.repos.getCollaboratorPermissionLevel,
+    ).mockResolvedValue({ data: { permission: 'read' } } as Awaited<
+      ReturnType<typeof f.board.api.rest.repos.getCollaboratorPermissionLevel>
+    >);
+    await expect(
+      requestManualAi(f.board, service, 1, 'triage'),
+    ).rejects.toThrow(/collaborator|human/i);
+  } finally {
+    vi.unstubAllEnvs();
+    rmSync(eventFile, { force: true });
+  }
+});
+
+it('recovers a completed trusted AI proposal with missing Foundry configuration and drains later commands', async () => {
+  const f = fixture();
+  const foundry = foundryFixture();
+  f.board.integrations.foundry = foundry;
+  f.command('/ai triage');
+  vi.spyOn(f.board.api.rest.issues, 'updateComment').mockRejectedValueOnce(
+    new Error('interrupted audit write'),
+  );
+  await expect(f.board.applyCommands(1)).rejects.toThrow(
+    'interrupted audit write',
+  );
+  f.board.integrations.foundry = undefined;
+  f.command('/start', 'worker');
+  await expect(f.board.applyCommands(1)).resolves.toMatchObject({
+    accepted: 1,
+  });
+  expect(foundry.call).toHaveBeenCalledTimes(1);
+  expect(
+    f.comments.filter((comment) =>
+      comment.body.includes('pronoia:ai-proposal'),
+    ),
+  ).toHaveLength(1);
+  expect(f.issue.labels).toContain('status:in-progress');
+});
+
+it('audits Copilot HTTP-200 nonconfirmation as a terminal no-op without poisoning recovery or later commands', async () => {
+  const f = fixture();
+  const agentApi = new Octokit({
+    retry: { enabled: false },
+    throttle: { enabled: false },
+    request: {
+      fetch: async () =>
+        new Response('{"assignees":[]}', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    },
+  });
+  f.board.integrations.agentApi = agentApi;
+  vi.spyOn(agentApi, 'graphql').mockResolvedValue({
+    repository: {
+      suggestedActors: {
+        nodes: [{ login: 'copilot-swe-agent', __typename: 'Bot' }],
+      },
+    },
+  });
+  const assign = vi.spyOn(agentApi.rest.issues, 'addAssignees');
+  f.command('/copilot');
+  f.command('/start', 'worker');
+  expect(await f.board.applyCommands(1)).toEqual({ accepted: 1, rejected: 1 });
+  await f.board.applyCommands(1);
+  expect(assign).toHaveBeenCalledTimes(1);
+  expect(f.issue.assignees).toEqual([{ login: 'worker' }]);
+  expect(
+    f.comments.some((comment) =>
+      comment.body.includes('pronoia:copilot-error'),
+    ),
+  ).toBe(true);
+  expect(
+    f.comments.some((comment) =>
+      comment.body.includes('pronoia:copilot-assignment'),
+    ),
+  ).toBe(false);
 });

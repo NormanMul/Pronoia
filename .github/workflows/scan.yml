@@ -1,0 +1,184 @@
+name: Synthetic and target source scanning
+
+on:
+  schedule:
+    - cron: '0 22 * * 0'
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  PRONOIA_READ_APP_ID: ${{ vars.PRONOIA_READ_APP_ID || secrets.PRONOIA_READ_APP_ID || vars.PRONOIA_APP_ID || secrets.PRONOIA_APP_ID }}
+
+jobs:
+  targets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci -w @pronoia/core -w @pronoia/cli --include-workspace-root
+      - run: npm run build -w @pronoia/core && npm run build -w @pronoia/cli
+      - name: Optional separate target READ App
+        id: read-app
+        if: env.PRONOIA_READ_APP_ID != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ env.PRONOIA_READ_APP_ID }}
+          private-key: ${{ secrets.PRONOIA_READ_APP_PRIVATE_KEY || secrets.PRONOIA_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: read
+          permission-metadata: read
+      - name: Reject private/real public-board targets before checkout
+        id: targets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRONOIA_TARGET_TOKEN: ${{ secrets.PRONOIA_TARGET_TOKEN || secrets.PRONOIA_SCAN_TOKEN || steps.read-app.outputs.token }}
+        run: |
+          node packages/cli/dist/index.js scan-targets --check-public --output .pronoia-scan/targets.json
+          node -e "const fs=require('node:fs'); console.log('matrix='+JSON.stringify(JSON.parse(fs.readFileSync('.pronoia-scan/targets.json','utf8'))))" >> "$GITHUB_OUTPUT"
+
+  scan:
+    needs: targets
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write # Optional own-repository SARIF upload, not board status.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Optional target READ App
+        id: read-app
+        if: env.PRONOIA_READ_APP_ID != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ env.PRONOIA_READ_APP_ID }}
+          private-key: ${{ secrets.PRONOIA_READ_APP_PRIVATE_KEY || secrets.PRONOIA_APP_PRIVATE_KEY }}
+          owner: ${{ matrix.owner }}
+          repositories: ${{ matrix.name }}
+          permission-contents: read
+          permission-metadata: read
+      - name: Read target sources only (no install/build/runtime)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ matrix.repo }}
+          token: ${{ secrets.PRONOIA_TARGET_TOKEN || secrets.PRONOIA_SCAN_TOKEN || steps.read-app.outputs.token || (matrix.allow_board_token && secrets.GITHUB_TOKEN) }}
+          path: .pronoia-scan/target
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci -w @pronoia/core -w @pronoia/cli --include-workspace-root
+      - run: npm run build -w @pronoia/core && npm run build -w @pronoia/cli
+      - name: Install verified OSV-Scanner 2.7.1
+        run: |
+          curl --fail --silent --show-error --location --retry 2 \
+            https://github.com/google/osv-scanner/releases/download/v2.7.1/osv-scanner_linux_amd64 \
+            --output .pronoia-scan/osv-scanner
+          echo 'fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8  .pronoia-scan/osv-scanner' | sha256sum --check
+          chmod 755 .pronoia-scan/osv-scanner
+      - name: SCA only, then strip source messages and absolute paths
+        env:
+          TARGET_REPO: ${{ matrix.repo }}
+          TARGET_PATH: ${{ matrix.path }}
+          ASSESSMENT: ${{ matrix.assessment }}
+          SYNTHETIC: ${{ matrix.synthetic }}
+          OWN_SAMPLE: ${{ matrix.sample }}
+        run: |
+          set +e
+          .pronoia-scan/osv-scanner scan source -r ".pronoia-scan/target/$TARGET_PATH" \
+            --no-call-analysis=go --format sarif --output-file .pronoia-scan/raw.sarif \
+            > .pronoia-scan/osv.log 2>&1
+          result=$?
+          set -e
+          if [ "$result" -gt 1 ]; then echo "OSV scan failed explicitly (exit $result)."; exit "$result"; fi
+          extra=()
+          if [ "$SYNTHETIC" = true ]; then extra+=(--synthetic); fi
+          if [ "$OWN_SAMPLE" = true ]; then extra+=(--sample); fi
+          node packages/cli/dist/index.js sanitize-sarif .pronoia-scan/raw.sarif \
+            --repo "$TARGET_REPO" --assessment "$ASSESSMENT" \
+            --base-dir .pronoia-scan/target --output .pronoia-scan/report.json "${extra[@]}"
+      - name: Optional own-repository code scanning upload
+        if: matrix.repo == github.repository && matrix.path == '.'
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@800a1d8701a65d150a672fef0923dbf2660a62ec # v4
+        with:
+          sarif_file: .pronoia-scan/report.json.sarif
+          category: pronoia-osv
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sarif-${{ matrix.index }}
+          path: .pronoia-scan/report.json
+          retention-days: 1
+          if-no-files-found: error
+
+  ingest:
+    needs: scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: security-discovery
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+      issues: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci -w @pronoia/core -w @pronoia/cli --include-workspace-root
+      - run: npm run build -w @pronoia/core && npm run build -w @pronoia/cli
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4, verified official tag
+        with:
+          pattern: sarif-*
+          path: .pronoia-scan/reports
+      - name: Optional separate scanner READ App
+        id: read-app
+        if: env.PRONOIA_READ_APP_ID != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ env.PRONOIA_READ_APP_ID }}
+          private-key: ${{ secrets.PRONOIA_READ_APP_PRIVATE_KEY || secrets.PRONOIA_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: read
+          permission-metadata: read
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .pronoia-cache
+          key: enrichment-${{ github.repository }}-${{ github.run_id }}-sarif
+          restore-keys: enrichment-${{ github.repository }}-
+      - name: Ingest validated bundles and dispatch the shared issue worker
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRONOIA_TARGET_TOKEN: ${{ secrets.PRONOIA_TARGET_TOKEN || secrets.PRONOIA_SCAN_TOKEN || steps.read-app.outputs.token }}
+          PRONOIA_NVD_ENABLED: ${{ vars.PRONOIA_NVD_ENABLED }}
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          while IFS= read -r -d '' report; do
+            node packages/cli/dist/index.js ingest-sarif "$report" --bundle --dispatch
+          done < <(find .pronoia-scan/reports -type f -name '*.json' -print0)

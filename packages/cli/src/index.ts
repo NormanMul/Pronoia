@@ -12,8 +12,13 @@ import {
   configSchema,
   isAuditWriter,
   createGitHubClient,
+  foundryConfig,
+  createFoundryClient,
+  FoundryService,
+  safeText,
   type Config,
 } from '@pronoia/core';
+import { registerM2Commands, targetReadCredential } from './security.js';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
 
@@ -34,6 +39,8 @@ function config(): Config {
 }
 
 function board(): Board {
+  if (process.env.GITHUB_ACTIONS === 'true' && !process.env.GITHUB_TOKEN)
+    throw new Error('GitHub Actions requires its authoritative GITHUB_TOKEN.');
   const token =
     process.env.GITHUB_TOKEN ||
     execFileSync('gh', ['auth', 'token'], {
@@ -42,7 +49,22 @@ function board(): Board {
     }).trim();
   if (!token)
     throw new Error('Authenticate with gh auth login or set GITHUB_TOKEN.');
-  return new Board(createGitHubClient(token), config());
+  const foundry = foundryConfig();
+  const targetToken = targetReadCredential();
+  return new Board(createGitHubClient(token), config(), {
+    ...(targetToken ? { targetApi: createGitHubClient(targetToken) } : {}),
+    ...(process.env.PRONOIA_AGENT_TOKEN
+      ? { agentApi: createGitHubClient(process.env.PRONOIA_AGENT_TOKEN) }
+      : {}),
+    ...(foundry.ok
+      ? {
+          foundry: new FoundryService(
+            createFoundryClient(foundry.value),
+            foundry.value,
+          ),
+        }
+      : {}),
+  });
 }
 
 function writerIssue(options: { issue?: string }): number {
@@ -277,9 +299,15 @@ program
     },
   );
 
+registerM2Commands(program, { config, board, writerIssue, output });
+
 await program.parseAsync(process.argv).catch((error: unknown) => {
   console.error(
-    error instanceof Error ? error.message : 'Unexpected Pronoia CLI error.',
+    error instanceof z.ZodError || error instanceof SyntaxError
+      ? 'Invalid command, configuration or security input schema.'
+      : error instanceof Error
+        ? safeText(error.message)
+        : 'Unexpected Pronoia CLI error.',
   );
   process.exitCode = 1;
 });

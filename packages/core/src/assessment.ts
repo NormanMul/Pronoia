@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { parseCsv } from './csv.js';
 import { repoSchema } from './config.js';
 import { severitySchema, sourceSchema } from './workflow/schemas.js';
+import { findingSchema, securitySourceSchema } from './security/findings.js';
+import { enrichmentSchema } from './security/enrichment.js';
 
 export const assessmentColumns = [
   'test_id',
@@ -32,41 +34,53 @@ const rowSchema = z.object({
 });
 export type AssessmentRow = z.infer<typeof rowSchema>;
 
-export const metaSchema = z.object({
-  dedupe_key: z.string().min(1).max(500),
-  assessment: z.string().min(1).max(200),
-  test_id: z.string().max(200),
-  source: sourceSchema,
-  category: z.string().default(''),
-  milestone: z.string().default(''),
-  evidence_required: z.boolean().default(true),
-  owner_role: z.string().default(''),
-  test_description: z.string().default(''),
-  procedure: z.string().default(''),
-  expected_result: z.string().default(''),
-  actual_result: z.string().default(''),
-  remediation: z.array(z.string()).default([]),
-  references: z.array(z.string()).default([]),
-  alert_refs: z
-    .array(
-      z.object({
-        repo: repoSchema,
-        source: z.enum(['dependabot', 'code-scanning', 'secret-scanning']),
-        number: z.number().int().positive(),
-      }),
-    )
-    .default([]),
-  cve_ids: z.array(z.string()).default([]),
-  cvss: z.number().min(0).max(10).nullable().default(null),
-  epss: z.number().min(0).max(1).nullable().default(null),
-  epss_percentile: z.number().min(0).max(1).nullable().default(null),
-  epss_date: z.iso.date().nullable().default(null),
-  kev: z.boolean().default(false),
-  kev_due_date: z.iso.date().nullable().default(null),
-  priority: z.enum(['p1', 'p2', 'p3', 'p4']).default('p4'),
-  due_date: z.iso.date().nullable().default(null),
-  synthetic: z.boolean().default(false),
-});
+export const metaSchema = z
+  .object({
+    dedupe_key: z.string().min(1).max(500),
+    assessment: z.string().min(1).max(200),
+    test_id: z.string().max(200),
+    source: sourceSchema,
+    category: z.string().default(''),
+    milestone: z.string().default(''),
+    evidence_required: z.boolean().default(true),
+    owner_role: z.string().default(''),
+    test_description: z.string().default(''),
+    procedure: z.string().default(''),
+    expected_result: z.string().default(''),
+    actual_result: z.string().default(''),
+    remediation: z.array(z.string()).default([]),
+    references: z.array(z.string()).default([]),
+    alert_refs: z
+      .array(
+        z.object({
+          repo: repoSchema,
+          source: z.enum(['dependabot', 'code-scanning', 'secret-scanning']),
+          number: z.number().int().positive(),
+        }),
+      )
+      .default([]),
+    cve_ids: z.array(z.string()).default([]),
+    cvss: z.number().min(0).max(10).nullable().default(null),
+    epss: z.number().min(0).max(1).nullable().default(null),
+    epss_percentile: z.number().min(0).max(1).nullable().default(null),
+    epss_date: z.iso.date().nullable().default(null),
+    kev: z.boolean().default(false),
+    kev_due_date: z.iso.date().nullable().default(null),
+    priority: z.enum(['p1', 'p2', 'p3', 'p4']).default('p4'),
+    due_date: z.iso.date().nullable().default(null),
+    first_seen_at: z.iso.datetime({ offset: true }).nullable().default(null),
+    finding: findingSchema.optional(),
+    enrichment: enrichmentSchema.optional(),
+    synthetic: z.boolean().default(false),
+  })
+  .transform((meta) => ({
+    ...meta,
+    evidence_required:
+      securitySourceSchema.safeParse(meta.source).success ||
+      meta.finding !== undefined
+        ? true
+        : meta.evidence_required,
+  }));
 export type IssueMeta = z.infer<typeof metaSchema>;
 
 export function slug(value: string): string {

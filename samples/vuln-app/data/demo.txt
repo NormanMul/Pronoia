@@ -1,0 +1,3 @@
+Synthetic demonstration data only.
+Contoso, Fabrikam and Northwind are fictional fixtures.
+No credentials, customer records or production connections belong here.

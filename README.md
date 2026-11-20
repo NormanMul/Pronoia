@@ -5,9 +5,10 @@ the authoritative assessment board and comment commands provide the audit trail.
 
 ## Implementation status
 
-The workspaces, governed board engine, CLI, comment workflow and behavior tests
-are implemented. Desktop, scanning and reporting features follow in the remaining
-milestones. Audio capture is not part of the board milestone.
+M0–M2 provide the governed board, recoverable comment commands, validated native
+alerts/SARIF, cached enrichment and SLAs, direct Foundry role/audio adapters and
+reviewable AI/Copilot integrations. Live Foundry credentials/deployments are
+configured separately. Desktop capture, UI and reporting remain later milestones.
 
 | Milestone | Deliverable                                                   |
 | --------- | ------------------------------------------------------------- |
@@ -59,8 +60,30 @@ npm run pronoia -- comment --issue 1 --body "/validate verified in the demo"
 ```
 
 Agents add `--agent scout` or set `PRONOIA_AGENT_NAME`. Human-only commands are
-refused even when the agent uses a human token. `/ai` and `/copilot` require the
-security/Foundry milestone and are not enabled by the board scaffold alone.
+refused even when the agent uses a human token. Collaborators may post
+`/ai triage|remediate|test-plan|summarize` for a labelled, non-authoritative
+proposal. `/copilot` requires a separate, supported user `PRONOIA_AGENT_TOKEN`;
+it preserves assignees and records a recoverable assignment receipt.
+
+## Security and AI
+
+`sync-security.yml` discovers all configured targets daily and explicitly
+dispatches the same per-issue command authority. The weekly/manual scanner reads
+target sources and the intentionally vulnerable synthetic sample without
+executing either. Merged same-repository PR references request **Validate, never
+Done**. Separate target READ/optional-dismiss credentials never write statuses.
+
+Offline previews need no credentials or network:
+
+```sh
+npm run pronoia -- sync-security --fixtures samples/security --dry-run --synthetic
+npm run pronoia -- ingest-sarif samples/security/sarif.json --dry-run --synthetic
+```
+
+See [security and AI integration](docs/security-and-ai.md) for workflows, token
+permissions, exact dismissal enums, privacy/expiry behavior and the public
+main-process Foundry API. The [vulnerable fixture](samples/vuln-app/README.md) must
+never be deployed or run in a shared environment.
 
 ## Safety
 

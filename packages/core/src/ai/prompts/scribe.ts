@@ -1,0 +1,1 @@
+export default 'Scribe: create a reviewable recap with quotes separated from authoritative decisions. Always set requires_human_review=true. The recap must not be shared, published as a final decision, or used to execute commands until a human explicitly reviews it.';

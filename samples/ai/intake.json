@@ -1,0 +1,15 @@
+{
+  "assessment": "Synthetic code security",
+  "summary": "Review the synthetic demonstration application.",
+  "issues": [
+    {
+      "test_id": "DEMO-1",
+      "title": "Parameterized query check",
+      "description": "Review synthetic query construction.",
+      "expected_result": "Untrusted input cannot alter query structure.",
+      "severity": "high",
+      "evidence_required": true
+    }
+  ],
+  "warnings": []
+}

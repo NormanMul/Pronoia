@@ -1,6 +1,7 @@
 import type { Config } from '../config.js';
 import { readMeta } from '../assessment.js';
 import { readAudit } from './engine.js';
+import { securitySourceSchema } from '../security/findings.js';
 import { severitySchema, stateSchema, type WorkflowState } from './schemas.js';
 
 type GuardIssue = {
@@ -24,12 +25,26 @@ export function expectedState(
       config.governance.evidence_required_for_approve,
     due_date: meta?.due_date ?? null,
   });
+  let manualDue = false;
   for (const comment of comments) {
     if (!comment.user) continue;
     const audit = readAudit(comment.body, comment.user.login);
-    if (audit) state = audit.state;
+    if (audit) {
+      state = audit.state;
+      manualDue ||= audit.command.name === 'due';
+    }
   }
   state.assignees = issue.assignees.map((user) => user.login);
+  state.evidence_required =
+    meta?.finding !== undefined ||
+    securitySourceSchema.options.some(
+      (source) =>
+        meta?.source === source || issue.labels.includes(`source:${source}`),
+    )
+      ? true
+      : (meta?.evidence_required ??
+        config.governance.evidence_required_for_approve);
+  if (!manualDue) state.due_date = meta?.due_date ?? state.due_date;
   const severity = issue.labels
     .find((label) => label.startsWith('severity:'))
     ?.slice(9);

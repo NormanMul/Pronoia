@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { expectedState, guardPlan } from './guards.js';
 import { configSchema } from '../config.js';
-import { marker } from '../assessment.js';
+import { marker, metaSchema } from '../assessment.js';
 import { stateSchema } from './schemas.js';
 
 const config = configSchema.parse({});
@@ -96,4 +96,47 @@ it('recloses an approved issue reopened without an audited reopen command', () =
       config,
     ),
   ).toMatchObject({ close: true });
+});
+
+it('overlays refreshed anchored SLA metadata after audit recovery, but preserves a human /due override', () => {
+  const updated = {
+    ...issue,
+    body: marker(
+      'meta',
+      metaSchema.parse({
+        dedupe_key: 'dependabot/demo/repo/1',
+        assessment: 'demo',
+        source: 'dependabot',
+        test_id: '1',
+        due_date: '2026-11-08',
+      }),
+    ),
+  };
+  const comments = [
+    {
+      user: { login: 'github-actions[bot]' },
+      body: marker('transition', {
+        ...audit,
+        state: stateSchema.parse({
+          status: 'validate',
+          due_date: '2026-11-15',
+        }),
+      }),
+    },
+  ];
+  expect(expectedState(updated, comments, config).due_date).toBe('2026-11-08');
+  comments.push({
+    user: { login: 'github-actions[bot]' },
+    body: marker('transition', {
+      ...audit,
+      command: {
+        name: 'due',
+        due: '2026-12-01',
+        reason: '2026-12-01',
+        validatedBy: '',
+      },
+      state: stateSchema.parse({ status: 'validate', due_date: '2026-12-01' }),
+    }),
+  });
+  expect(expectedState(updated, comments, config).due_date).toBe('2026-12-01');
 });

@@ -1,0 +1,57 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "synthetic-scanner",
+          "rules": [
+            {
+              "id": "CVE-2021-23337",
+              "shortDescription": { "text": "Synthetic vulnerable dependency" },
+              "properties": { "security-severity": "7.2" }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "CVE-2021-23337",
+          "level": "error",
+          "message": { "text": "untrusted-result-message" },
+          "partialFingerprints": {
+            "primaryLocationLineHash": "synthetic-location"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "samples/vuln-app/package-lock.json"
+                },
+                "region": { "startLine": 1 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CVE-2021-23337",
+          "message": { "text": "untrusted-result-message duplicate" },
+          "partialFingerprints": {
+            "primaryLocationLineHash": "synthetic-location"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "samples/vuln-app/package-lock.json"
+                },
+                "region": { "startLine": 1 }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -28,10 +28,19 @@ import {
   readAudit,
 } from './workflow/engine.js';
 import { expectedState, guardPlan } from './workflow/guards.js';
+import { SecurityAlerts } from './security/alerts.js';
+import type { FoundryService } from './ai/foundry.js';
+import {
+  checkCopilot,
+  assignCopilot,
+  proposeAi,
+  CopilotUnavailableError,
+} from './ai/commands.js';
 import {
   sourceSchema,
   statusSchema,
   severitySchema,
+  stateSchema,
   type Actor,
   type Audit,
   type Command,
@@ -72,6 +81,11 @@ export const commentSchema = z.object({
 });
 export type Issue = z.infer<typeof issueSchema>;
 export type IssueComment = z.infer<typeof commentSchema>;
+export type BoardIntegrations = {
+  targetApi?: Octokit;
+  agentApi?: Octokit;
+  foundry?: FoundryService;
+};
 
 function httpStatus(error: unknown, status: number): boolean {
   return (
@@ -87,6 +101,7 @@ export class Board {
   constructor(
     readonly api: Octokit,
     readonly config: Config,
+    readonly integrations: BoardIntegrations = {},
   ) {
     const [owner, repo] = repoSchema.parse(config.board_repo).split('/');
     if (!owner || !repo) throw new Error('Invalid board repository.');
@@ -626,9 +641,22 @@ export class Board {
     let merged = false;
     for (const reference of references.values()) {
       try {
+        const referenceApi =
+          `${reference.owner}/${reference.repo}`.toLowerCase() ===
+          this.config.board_repo.toLowerCase()
+            ? this.api
+            : (this.integrations.targetApi ?? this.api);
+        if (
+          `${reference.owner}/${reference.repo}`.toLowerCase() !==
+            this.config.board_repo.toLowerCase() &&
+          !this.integrations.targetApi
+        )
+          throw new CommandError(
+            'External GitHub references require a separate target READ credential.',
+          );
         if (reference.kind === 'issue') {
           const linked = (
-            await this.api.rest.issues.get({
+            await referenceApi.rest.issues.get({
               owner: reference.owner,
               repo: reference.repo,
               issue_number: reference.number,
@@ -636,13 +664,24 @@ export class Board {
           ).data;
           if (!linked.pull_request) continue;
         }
-        const pr = (
-          await this.api.rest.pulls.get({
+        const response = (
+          await referenceApi.rest.pulls.get({
             owner: reference.owner,
             repo: reference.repo,
             pull_number: reference.number,
           })
         ).data;
+        const parsedPr = z
+          .object({
+            user: z.object({ login: z.string().min(1) }).nullable(),
+            merged_at: z.iso.datetime({ offset: true }).nullable(),
+          })
+          .safeParse(response);
+        if (!parsedPr.success)
+          throw new CommandError(
+            'Linked PR author/merge state cannot be verified.',
+          );
+        const pr = parsedPr.data;
         if (!pr.user)
           throw new CommandError('Linked PR author cannot be verified.');
         authors.add(pr.user.login);
@@ -682,14 +721,84 @@ export class Board {
       }
       verified.add(evidence.file);
     }
+    const meta = readMeta(issue.body);
+    const targets = this.config.targets.length
+      ? this.config.targets.map((target) => target.repo)
+      : [this.config.board_repo];
+    const refs = meta?.alert_refs ?? [];
+    if (
+      refs.some(
+        (ref) =>
+          !targets.some(
+            (target) => target.toLowerCase() === ref.repo.toLowerCase(),
+          ),
+      )
+    ) {
+      throw new CommandError('Linked source alert is not a configured target.');
+    }
+    const alertFixed =
+      merged &&
+      meta &&
+      ['dependabot', 'code-scanning', 'secret-scanning'].includes(
+        meta.source,
+      ) &&
+      refs.length > 0
+        ? await new SecurityAlerts(
+            this.integrations.targetApi ?? this.api,
+            this.integrations.targetApi ? undefined : this.config.board_repo,
+          ).fixed(refs)
+        : false;
     return {
       ...state,
       assignees: issue.assignees.map((user) => user.login),
       pr_authors: [...authors],
       has_merged_pr: merged,
       evidence_count: verified.size,
-      alert_fixed: false,
+      alert_fixed: Boolean(alertFixed),
     };
+  }
+
+  private auditBody(audit: Audit): string {
+    return `${audit.failure_reason ? `Pronoia rejected /${audit.command.name}: ${audit.failure_reason} Status unchanged.` : `Pronoia audit: /${audit.command.name}: ${audit.from} -> ${audit.to}, by @${audit.actor}.`}\n\n${marker('transition', audit)}`;
+  }
+
+  private async commandEffect(
+    issue: Issue,
+    audit: Audit,
+    journal: number,
+  ): Promise<Audit> {
+    const result = { ...audit, audit_comment_id: journal };
+    if (audit.failure_reason) return result;
+    if (audit.command.name === 'ai') {
+      result.effect_comment_id = await proposeAi(
+        this,
+        issue,
+        audit,
+        journal,
+        this.integrations.foundry,
+      );
+    }
+    if (audit.command.name === 'copilot') {
+      try {
+        const effect = await assignCopilot(
+          this,
+          issue,
+          audit,
+          journal,
+          this.integrations.agentApi,
+        );
+        result.state = { ...audit.state, assignees: effect.assignees };
+        result.effect_comment_id = effect.comment_id;
+      } catch (error) {
+        if (!(error instanceof CopilotUnavailableError) || !audit.before_state)
+          throw error;
+        result.state = audit.before_state;
+        result.to = audit.before_state.status;
+        result.failure_reason = error.message;
+        result.effect_comment_id = error.comment_id;
+      }
+    }
+    return result;
   }
 
   async applyCommands(
@@ -717,16 +826,34 @@ export class Board {
           .object({
             comment_id: z.number().int().positive(),
             accepted: z.boolean(),
+            terminal: z.boolean().optional(),
           })
           .parse(JSON.parse(match[1]));
         processed.add(result.comment_id);
-        if (result.accepted) completed.add(result.comment_id);
+        if (result.accepted || result.terminal)
+          completed.add(result.comment_id);
       }
     }
     const incomplete = audits.filter(
       (entry) => !completed.has(entry.audit.comment_id),
     );
     if (incomplete.length) {
+      for (const entry of incomplete) {
+        if (['ai', 'copilot'].includes(entry.audit.command.name)) {
+          entry.audit = await this.commandEffect(
+            issue,
+            entry.audit,
+            entry.comment.id,
+          );
+          issue = await this.issue(number);
+          entry.comment.body = this.auditBody(entry.audit);
+          await this.api.rest.issues.updateComment({
+            ...this.scope,
+            comment_id: entry.comment.id,
+            body: entry.comment.body,
+          });
+        }
+      }
       const latest = audits.at(-1);
       if (!latest) throw new Error('Incomplete journal has no audit.');
       await this.reconcile(issue, latest.audit.state);
@@ -734,12 +861,12 @@ export class Board {
         await this.api.rest.reactions.createForIssueComment({
           ...this.scope,
           comment_id: entry.audit.comment_id,
-          content: '+1',
+          content: entry.audit.failure_reason ? '-1' : '+1',
         });
         await this.api.rest.issues.updateComment({
           ...this.scope,
           comment_id: entry.comment.id,
-          body: `${entry.comment.body}\n\n${marker('command-result', { comment_id: entry.audit.comment_id, accepted: true })}`,
+          body: `${entry.comment.body}\n\n${marker('command-result', { comment_id: entry.audit.comment_id, accepted: !entry.audit.failure_reason, ...(entry.audit.failure_reason ? { terminal: true } : {}) })}`,
         });
       }
       issue = await this.issue(number);
@@ -777,9 +904,17 @@ export class Board {
           );
         }
         if (['ai', 'copilot'].includes(command.name)) {
-          throw new CommandError(
-            `/${command.name} requires the M2 integration.`,
-          );
+          if (command.name === 'ai' && !this.integrations.foundry)
+            throw new CommandError(
+              'Foundry is not configured; /ai is unavailable.',
+            );
+          if (command.name === 'copilot') {
+            if (!this.integrations.agentApi)
+              throw new CommandError(
+                'Copilot requires the separate PRONOIA_AGENT_TOKEN user token.',
+              );
+            await checkCopilot(this, issue, this.integrations.agentApi);
+          }
         }
         if (command.name === 'approve')
           state = await this.approvalContext(issue, state);
@@ -796,8 +931,11 @@ export class Board {
           at,
           comment_id: comment.id,
           state: result,
+          ...(command.name === 'copilot'
+            ? { before_state: stateSchema.parse(state) }
+            : {}),
         };
-        auditBody = `Pronoia audit: /${command.name}: ${state.status} -> ${result.status}, by @${actor.login}.\n\n${marker('transition', audit)}`;
+        auditBody = this.auditBody(audit);
         if (auditBody.length + 200 > 60000) {
           throw new CommandError(
             'Serialized audit is too large; shorten the reason or validation name.',
@@ -840,20 +978,36 @@ export class Board {
       }
       // Journal first so a retried workflow can repair interrupted API writes.
       const journal = await this.comment(number, auditBody);
+      if (!journal.user || !isAuditWriter(journal.user.login))
+        throw new CommandError(
+          'The audit writer must be the authoritative github-actions[bot] identity.',
+        );
+      audit = await this.commandEffect(issue, audit, journal.id);
+      result = audit.state;
+      auditBody = this.auditBody(audit);
+      if (['ai', 'copilot'].includes(command.name)) {
+        await this.api.rest.issues.updateComment({
+          ...this.scope,
+          comment_id: journal.id,
+          body: auditBody,
+        });
+        issue = await this.issue(number);
+      }
       await this.reconcile(issue, result);
       await this.api.rest.reactions.createForIssueComment({
         ...this.scope,
         comment_id: comment.id,
-        content: '+1',
+        content: audit.failure_reason ? '-1' : '+1',
       });
       await this.api.rest.issues.updateComment({
         ...this.scope,
         comment_id: journal.id,
-        body: `${auditBody}\n\n${marker('command-result', { comment_id: comment.id, accepted: true })}`,
+        body: `${auditBody}\n\n${marker('command-result', { comment_id: comment.id, accepted: !audit.failure_reason, ...(audit.failure_reason ? { terminal: true } : {}) })}`,
       });
       state = result;
       issue = await this.issue(number);
-      accepted += 1;
+      if (audit.failure_reason) rejected += 1;
+      else accepted += 1;
     }
     return { accepted, rejected };
   }

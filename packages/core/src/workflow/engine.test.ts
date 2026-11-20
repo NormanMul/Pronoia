@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   actorType,
   allowedCommands,
+  authorize,
   nextState,
   parseAgentMarker,
   parseCommand,
@@ -450,8 +451,40 @@ describe('audit and governance data', () => {
       evidence_count: 1,
       validation_requested_by: 'requester',
     });
+
     expect(() =>
       nextState(pending, command, actor, config, '2026-11-22T12:00:00.000Z'),
     ).toThrow(/expired/i);
+  });
+
+  it('permits only restricted internal Actions commands despite bot association NONE', () => {
+    const internal = {
+      login: 'github-actions[bot]',
+      userType: 'Bot' as const,
+      association: 'NONE',
+    };
+    for (const body of [
+      '/start',
+      '/validate verified',
+      '/block missing evidence',
+      '/reopen source reappeared',
+    ]) {
+      const command = parseCommand(body);
+      if (!command) throw new Error('Missing command fixture');
+      expect(() => authorize(command, internal, config)).not.toThrow();
+    }
+    const approve = parseCommand('/approve');
+    const start = parseCommand('/start');
+    if (!approve || !start) throw new Error('Missing command fixture');
+    expect(() => authorize(approve, internal, config)).toThrow();
+    const configured = configSchema.parse({
+      governance: { automation_logins: ['machine'] },
+    });
+    expect(() =>
+      authorize(start, { ...internal, login: 'machine' }, configured),
+    ).toThrow();
+    expect(() =>
+      authorize(start, { ...internal, login: 'external[bot]' }, configured),
+    ).toThrow();
   });
 });

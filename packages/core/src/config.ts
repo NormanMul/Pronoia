@@ -31,7 +31,11 @@ export const configSchema = z
       .optional(),
     targets: z
       .array(
-        z.object({ repo: repoSchema, assessment: z.string().min(1).max(200) }),
+        z.object({
+          repo: repoSchema,
+          assessment: z.string().min(1).max(200),
+          synthetic: z.boolean().default(false),
+        }),
       )
       .default([]),
     priority: z

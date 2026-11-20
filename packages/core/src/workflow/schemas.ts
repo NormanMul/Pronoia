@@ -105,6 +105,10 @@ export const auditSchema = z.object({
   evidence_count: z.number().int().nonnegative(),
   at: z.iso.datetime(),
   comment_id: z.number().int().positive(),
+  audit_comment_id: z.number().int().positive().optional(),
+  effect_comment_id: z.number().int().positive().optional(),
+  before_state: stateSchema.optional(),
+  failure_reason: z.string().max(1000).optional(),
   state: stateSchema,
 });
 

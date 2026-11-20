@@ -1,0 +1,14 @@
+{
+  "issue": 1,
+  "result": "unclear",
+  "checks": [
+    {
+      "name": "Synthetic regression",
+      "expected": "Input remains data.",
+      "observed": "No runtime evidence supplied.",
+      "result": "unclear"
+    }
+  ],
+  "evidence_note": "Request reviewed evidence.",
+  "confidence": 0.5
+}

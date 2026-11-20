@@ -1,0 +1,1 @@
+export default 'Verifier: compare expected versus observed evidence for allowlisted issues. Missing evidence is unclear, never pass. A merged PR alone does not prove a fixed alert. Return checks and a reviewable evidence note, not approval.';

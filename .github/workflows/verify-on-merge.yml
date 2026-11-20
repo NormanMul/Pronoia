@@ -1,0 +1,37 @@
+name: Verify on merge
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  referenced:
+    if: >-
+      github.event.pull_request.merged &&
+      github.event.pull_request.base.repo.full_name == github.repository &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write # Persist issue-level merge intents before dispatch.
+      pull-requests: read
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci -w @pronoia/core -w @pronoia/cli --include-workspace-root
+      - run: npm run build -w @pronoia/core && npm run build -w @pronoia/cli
+      - name: Verify real PR state and dispatch issue workers (never Done)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGED_PULL: ${{ github.event.pull_request.number }}
+        run: node packages/cli/dist/index.js verify-on-merge --pull "$MERGED_PULL" --discover --dispatch

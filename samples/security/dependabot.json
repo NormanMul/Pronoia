@@ -1,0 +1,43 @@
+[
+  {
+    "number": 1,
+    "state": "open",
+    "created_at": "2026-11-01T12:00:00Z",
+    "updated_at": "2026-11-20T12:00:00Z",
+    "dependency": {
+      "package": { "ecosystem": "npm", "name": "lodash" },
+      "manifest_path": "samples/vuln-app/package-lock.json"
+    },
+    "security_advisory": {
+      "ghsa_id": "GHSA-35jh-r3h4-6jhm",
+      "cve_id": "CVE-2021-23337",
+      "summary": "Synthetic dependency demonstration",
+      "severity": "high",
+      "cvss": { "score": 7.2 }
+    },
+    "security_vulnerability": {
+      "vulnerable_version_range": "<4.17.21",
+      "first_patched_version": { "identifier": "4.17.21" }
+    }
+  },
+  {
+    "number": 2,
+    "state": "fixed",
+    "created_at": "2026-11-01T12:00:00Z",
+    "updated_at": "2026-11-20T12:00:00Z",
+    "dependency": {
+      "package": { "ecosystem": "npm", "name": "minimist" },
+      "manifest_path": "samples/vuln-app/package-lock.json"
+    },
+    "security_advisory": {
+      "ghsa_id": "GHSA-xvch-5gv4-984h",
+      "cve_id": "CVE-2021-44906",
+      "summary": "Synthetic fixed-alert demonstration",
+      "severity": "critical"
+    },
+    "security_vulnerability": {
+      "vulnerable_version_range": "<1.2.6",
+      "first_patched_version": { "identifier": "1.2.6" }
+    }
+  }
+]

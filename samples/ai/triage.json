@@ -1,0 +1,8 @@
+{
+  "summary": "Synthetic finding needs review.",
+  "priority": "p2",
+  "reason": "Use the supplied deterministic score, not an invented one.",
+  "remediation": ["Review the current advisory and add a regression test."],
+  "references": ["https://docs.github.com/en/code-security"],
+  "confidence": 0.8
+}

@@ -1,0 +1,5 @@
+{
+  "answer": "Use a parameterized statement and compare expected versus observed behavior.",
+  "references": ["https://docs.github.com/en/code-security"],
+  "confidence": 0.8
+}

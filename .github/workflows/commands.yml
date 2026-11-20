@@ -1,6 +1,32 @@
 name: Assessment commands
 
 on:
+  workflow_call:
+    inputs:
+      issue:
+        type: number
+        required: true
+      mode:
+        type: string
+        default: commands
+      pull:
+        type: string
+        default: '0'
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Assessment issue number
+        type: number
+        required: true
+      mode:
+        description: Queue processing or verified internal security work
+        type: choice
+        options: [commands, sync, merge]
+        default: commands
+      pull:
+        description: Same-repository merged PR number (merge mode only)
+        type: string
+        default: '0'
   issue_comment:
     types: [created]
   issues:
@@ -8,45 +34,104 @@ on:
 
 permissions: {}
 
+env:
+  PRONOIA_READ_APP_ID: ${{ vars.PRONOIA_READ_APP_ID || secrets.PRONOIA_READ_APP_ID || vars.PRONOIA_APP_ID || secrets.PRONOIA_APP_ID }}
+
 jobs:
   command:
     if: >-
-      !github.event.issue.pull_request &&
-      contains(github.event.issue.labels.*.name, 'pronoia') &&
-      github.event.sender.login != 'github-actions[bot]' &&
-      (
-        (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/')) ||
-        (github.event_name == 'issues' &&
-          (github.event.action == 'closed' || github.event.action == 'reopened' ||
-            startsWith(github.event.label.name, 'status:')))
-      )
+      inputs.issue != '' ||
+      (!github.event.issue.pull_request &&
+        contains(github.event.issue.labels.*.name, 'pronoia') &&
+        github.event.sender.login != 'github-actions[bot]' &&
+        ((github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/') &&
+          !startsWith(github.event.comment.body, '/ai') &&
+          !startsWith(github.event.comment.body, '/AI') &&
+          !startsWith(github.event.comment.body, '/Ai') &&
+          !startsWith(github.event.comment.body, '/aI')) ||
+         (github.event_name == 'issues' &&
+           (github.event.action == 'closed' || github.event.action == 'reopened' ||
+             startsWith(github.event.label.name, 'status:')))))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     concurrency:
-      group: issue-${{ github.event.issue.number }}
+      group: issue-${{ inputs.issue || github.event.issue.number }}
       cancel-in-progress: false
     permissions:
       contents: read
       issues: write
+      pull-requests: read
+      security-events: read
+      id-token: write # Any queue worker can encounter a pending human /ai command.
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: main
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
-      - run: npm run build
-      - name: Apply queued commands
-        if: github.event_name == 'issue_comment'
+      - run: npm ci -w @pronoia/core -w @pronoia/cli --include-workspace-root
+      - run: npm run build -w @pronoia/core && npm run build -w @pronoia/cli
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .pronoia-cache
+          key: enrichment-${{ github.repository }}-${{ github.run_id }}-${{ inputs.issue || github.event.issue.number }}
+          restore-keys: enrichment-${{ github.repository }}-
+      - name: Optional separate scanner READ App
+        id: read-app
+        if: env.PRONOIA_READ_APP_ID != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ env.PRONOIA_READ_APP_ID }}
+          private-key: ${{ secrets.PRONOIA_READ_APP_PRIVATE_KEY || secrets.PRONOIA_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: read
+          permission-metadata: read
+          permission-security-events: read
+          permission-vulnerability-alerts: read
+          permission-secret-scanning-alerts: read
+      - name: Optional Foundry workload identity
+        if: >-
+          vars.AZURE_AUTH_MODE != 'key' &&
+          vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != '' &&
+          vars.AZURE_SUBSCRIPTION_ID != ''
+        uses: azure/login@8216e11d8cd9b42fe925c852af8e76311ff067ac # v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Drain commands and process latest source state
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run pronoia -- apply-command
-      - name: Guard status and closure
-        if: github.event_name == 'issues'
+          PRONOIA_TARGET_TOKEN: ${{ secrets.PRONOIA_TARGET_TOKEN || secrets.PRONOIA_SCAN_TOKEN || steps.read-app.outputs.token }}
+          PRONOIA_DISMISS_TOKEN: ${{ secrets.PRONOIA_DISMISS_TOKEN }}
+          PRONOIA_AGENT_TOKEN: ${{ secrets.PRONOIA_AGENT_TOKEN }}
+          AZURE_FOUNDRY_ENDPOINT: ${{ vars.AZURE_FOUNDRY_ENDPOINT }}
+          FOUNDRY_CHAT_DEPLOYMENT: ${{ vars.FOUNDRY_CHAT_DEPLOYMENT }}
+          AZURE_AUTH_MODE: ${{ vars.AZURE_AUTH_MODE }}
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_FOUNDRY_API_KEY: ${{ secrets.AZURE_FOUNDRY_API_KEY }}
+          PRONOIA_NVD_ENABLED: ${{ vars.PRONOIA_NVD_ENABLED }}
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+          ISSUE_NUMBER: ${{ inputs.issue || github.event.issue.number }}
+          WORK_MODE: ${{ (inputs.mode == 'manual-ai' && 'commands') || inputs.mode || 'commands' }}
+          MERGED_PULL: ${{ inputs.pull || '0' }}
+        run: node packages/cli/dist/index.js process-issue --issue "$ISSUE_NUMBER" --mode "$WORK_MODE" --pull "$MERGED_PULL"
+      - name: Manual collaborator-only AI request
+        if: inputs.mode == 'manual-ai'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run pronoia -- apply-command
+          PRONOIA_AGENT_TOKEN: ${{ secrets.PRONOIA_AGENT_TOKEN }}
+          AZURE_FOUNDRY_ENDPOINT: ${{ vars.AZURE_FOUNDRY_ENDPOINT }}
+          FOUNDRY_CHAT_DEPLOYMENT: ${{ vars.FOUNDRY_CHAT_DEPLOYMENT }}
+          AZURE_AUTH_MODE: ${{ vars.AZURE_AUTH_MODE }}
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_FOUNDRY_API_KEY: ${{ secrets.AZURE_FOUNDRY_API_KEY }}
+          ISSUE_NUMBER: ${{ inputs.issue }}
+        run: node packages/cli/dist/index.js ai --issue "$ISSUE_NUMBER" --mode triage
       - name: Record authoritative processing
         run: echo 'Pronoia processed the comment queue or checked the status guard.' >> "$GITHUB_STEP_SUMMARY"

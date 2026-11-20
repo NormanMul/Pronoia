@@ -12,6 +12,13 @@ Commands occupy the first line of a comment, are case-insensitive and are
 accepted only from OWNER, MEMBER or COLLABORATOR. Actions are the only status
 writer. Never edit status labels directly.
 
+The sole internal exception is **github-actions[bot]**, as returned by GitHub:
+its own `/start`, `/validate`, `/block` and `/reopen` commands are accepted even
+with association NONE. This is internal Actions authority, not an ACL exception
+for external agents or configured `automation_logins`. Those logins never gain
+audit-writer trust. All issue workers share the same canonical numeric issue
+concurrency and drain the complete pending comment queue.
+
 | Command                                       | From                        | To                   |
 | --------------------------------------------- | --------------------------- | -------------------- |
 | `/start`                                      | todo, blocked               | in-progress          |
@@ -25,14 +32,23 @@ writer. Never edit status labels directly.
 
 Humans alone may approve, reject or dispute. Approval requires four-eyes:
 approver differs from the validation requester, assignees and linked-PR authors.
-Evidence is required unless the test explicitly disables it, or an automated
-finding has a merged PR and proof of a fixed alert. `Validated-by:` records
+Evidence is always required for Dependabot, code-scanning, secret-scanning and
+SARIF items, including after journal recovery. Only checklist tests may explicitly
+disable it. A native automated finding may instead have a real merged PR and
+live proof of a fixed alert. `Validated-by:` records
 on-behalf-of validation; it never substitutes for the GitHub actor.
 
 Bots, configured automation logins and comments carrying
 `<!-- pronoia:agent {"agent":"name"} -->` may only `/start`, `/validate`,
 `/block <reason>` and `/reopen <reason>`. A human token used by an agent MUST carry
 that marker (`--agent` or `PRONOIA_AGENT_NAME`).
+
+`/ai triage|remediate|test-plan|summarize` is human-only and produces a labelled
+proposal, never an automatic status decision. `/copilot` is human-only from To Do
+or In Progress, assigns the documented Copilot agent using a separate user token
+and constrains its PR to `Refs`, tests and no workflow changes. Proposals containing
+`/confirm` still require an actual human comment; external agents cannot confirm.
+Verbal approvals/rejections/disputes and Scribe recaps are data, not authority.
 
 ## Safe work loop
 

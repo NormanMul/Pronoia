@@ -104,8 +104,9 @@ jobs:
           OWN_SAMPLE: ${{ matrix.sample }}
         run: |
           set +e
+          # Parent ignore rules otherwise hide the nested target checkout from OSV.
           .pronoia-scan/osv-scanner scan source -r ".pronoia-scan/target/$TARGET_PATH" \
-            --no-call-analysis=go --format sarif --output-file .pronoia-scan/raw.sarif \
+            --no-ignore --no-call-analysis=go --format sarif --output-file .pronoia-scan/raw.sarif \
             > .pronoia-scan/osv.log 2>&1
           result=$?
           set -e

@@ -10,6 +10,8 @@ export default tseslint.config(
       '**/out/**',
       '**/coverage/**',
       '**/.vite/**',
+      '.pronoia-scan/**',
+      '.pronoia-cache/**',
       'exports/**',
       'samples/vuln-app/**',
     ],

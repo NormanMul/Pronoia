@@ -4,6 +4,8 @@ dist
 out
 coverage
 .vite
+.pronoia-scan
+.pronoia-cache
 exports
 *.csv
 *.tmdl

@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+out/
+.vite/
+coverage/
+exports/
+*.webm
+*.pem
+*.key
+*.pfx
+*.p12
+.worktrees/
+.DS_Store

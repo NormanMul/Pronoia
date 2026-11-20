@@ -210,3 +210,39 @@ it('rejects SARIF results without a message instead of accepting a malformed rep
     ),
   ).toThrow();
 });
+
+it('accepts the SARIF minus-one artifact-index sentinel used by real OSV reports', () => {
+  const report = (index: number) => ({
+    version: '2.1.0',
+    runs: [
+      {
+        tool: { driver: { name: 'OSV-Scanner' } },
+        artifacts: [
+          { location: { uri: 'samples/vuln-app/package-lock.json', index } },
+        ],
+        results: [
+          {
+            ruleId: 'GHSA-35jh-r3h4-6jhm',
+            message: { text: 'Synthetic vulnerable dependency.' },
+            locations: [
+              {
+                physicalLocation: {
+                  artifactLocation: {
+                    uri: 'samples/vuln-app/package-lock.json',
+                    index,
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const finding = ingestSarif(report(-1), repo)[0];
+  expect(finding?.path).toBe('samples/vuln-app/package-lock.json');
+  expect(ingestSarif(sanitizedSarif(report(-1), repo), repo)[0]?.key).toBe(
+    finding?.key,
+  );
+  expect(() => ingestSarif(report(-2), repo)).toThrow();
+});

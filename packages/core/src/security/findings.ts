@@ -334,7 +334,7 @@ export function ingestSecretScanning(input: unknown, repo: string): Finding[] {
 
 const artifactLocation = z.object({
   uri: z.string().max(2000).optional(),
-  index: z.number().int().nonnegative().optional(),
+  index: z.number().int().min(-1).optional(),
 });
 const sarifRule = z.object({
   id: z.string().min(1).max(500),

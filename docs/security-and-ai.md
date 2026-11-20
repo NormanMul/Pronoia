@@ -44,6 +44,9 @@ OSV uses `--no-ignore` for the nested, source-only checkout: OSV's documented
 repository-boundary limitation otherwise applies the board's `.pronoia-scan`
 ignore rule to the target and incorrectly reports no package sources. Target
 code is still never installed, built or executed.
+SARIF artifact index `-1` is the standard absence sentinel (and is emitted by
+OSV); lower values are rejected. An explicit URI remains subject to path
+redaction and the configured scanner-root boundary.
 
 Dependabot, code scanning and secret scanning are Zod-validated. Secret scanning
 requests use `hide_secret=true`; neither literal secrets nor secret locations are

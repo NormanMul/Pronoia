@@ -119,7 +119,7 @@ jobs:
       - name: Optional own-repository code scanning upload
         if: matrix.repo == github.repository && matrix.path == '.'
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@800a1d8701a65d150a672fef0923dbf2660a62ec # v4
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4
         with:
           sarif_file: .pronoia-scan/report.json.sarif
           category: pronoia-osv

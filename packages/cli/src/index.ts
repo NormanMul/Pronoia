@@ -19,11 +19,12 @@ import {
   type Config,
 } from '@pronoia/core';
 import { registerM2Commands, targetReadCredential } from './security.js';
+import { registerM4Commands } from './integrations.js';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
 
 function config(): Config {
-  const filename = resolve('pronoia.config.yml');
+  const filename = resolve(process.env.PRONOIA_CONFIG || 'pronoia.config.yml');
   const contents: unknown = existsSync(filename)
     ? parse(readFileSync(filename, 'utf8'))
     : {};
@@ -89,7 +90,12 @@ function output(value: unknown): void {
 async function importFile(
   file: string,
   assessment: string,
-  options: { dryRun?: boolean; synthetic?: boolean; milestone?: string },
+  options: {
+    dryRun?: boolean;
+    synthetic?: boolean;
+    milestone?: string;
+    agent?: string;
+  },
 ): Promise<void> {
   const rows = assessmentRows(readFileSync(resolve(file), 'utf8'));
   if (options.dryRun) {
@@ -105,7 +111,12 @@ async function importFile(
     });
     return;
   }
-  output(await board().importAssessment(rows, assessment, options));
+  output(
+    await board().importAssessment(rows, assessment, {
+      ...options,
+      agent: options.agent || process.env.PRONOIA_AGENT_NAME || undefined,
+    }),
+  );
 }
 
 const program = new Command()
@@ -180,6 +191,7 @@ program
   .requiredOption('--assessment <name>')
   .option('--milestone <name>')
   .option('--dry-run')
+  .option('--agent <name>', 'Stamp an agent identity on imported proposals')
   .option(
     '--synthetic',
     'Confirm all imported data is synthetic, required for public boards',
@@ -192,6 +204,7 @@ program
         milestone?: string;
         dryRun?: boolean;
         synthetic?: boolean;
+        agent?: string;
       },
     ) => importFile(file, options.assessment, options),
   );
@@ -300,6 +313,7 @@ program
   );
 
 registerM2Commands(program, { config, board, writerIssue, output });
+registerM4Commands(program, { config, board, output });
 
 await program.parseAsync(process.argv).catch((error: unknown) => {
   console.error(

@@ -15,3 +15,6 @@ export * from './security/intents.js';
 export * from './ai/roles.js';
 export * from './ai/foundry.js';
 export * from './ai/commands.js';
+export * from './export-contract.js';
+export * from './exporter.js';
+export * from './integrations.js';

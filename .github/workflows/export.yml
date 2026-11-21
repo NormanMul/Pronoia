@@ -1,0 +1,102 @@
+name: Audited assessment exports
+
+on:
+  schedule:
+    - cron: '0 0 * * 5'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pronoia-export-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci -w @pronoia/core -w @pronoia/cli --include-workspace-root
+      - run: npm run build -w @pronoia/core && npm run build -w @pronoia/cli
+      - name: Build audited latest and dated exports
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node packages/cli/dist/index.js export --out .pronoia-export
+      - name: Publish only managed paths on the exports branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node packages/cli/dist/index.js export-publish --out .pronoia-export
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pronoia-audited-export
+          path: .pronoia-export
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+      - name: Report optional SharePoint configuration
+        if: vars.SP_SITE_ID == '' && vars.SP_DRIVE_ID == '' && vars.SP_FOLDER == ''
+        run: echo 'SharePoint skipped; SP_SITE_ID, SP_DRIVE_ID and SP_FOLDER are not configured.' >> "$GITHUB_STEP_SUMMARY"
+
+  sharepoint:
+    needs: export
+    if: vars.SP_SITE_ID != '' || vars.SP_DRIVE_ID != '' || vars.SP_FOLDER != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SP_SITE_ID: ${{ vars.SP_SITE_ID }}
+      SP_DRIVE_ID: ${{ vars.SP_DRIVE_ID }}
+      SP_FOLDER: ${{ vars.SP_FOLDER }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TOKEN_CREDENTIALS: AzureCliCredential
+      AZURE_CORE_OUTPUT: none
+    steps:
+      - name: Require complete optional SharePoint and OIDC settings
+        run: |
+          if [ -z "$SP_SITE_ID" ] || [ -z "$SP_DRIVE_ID" ] || [ -z "$SP_FOLDER" ]; then
+            echo '::error::SharePoint configuration incomplete: set SP_SITE_ID, SP_DRIVE_ID and SP_FOLDER.'
+            exit 1
+          fi
+          if [ -z "$AZURE_CLIENT_ID" ] || [ -z "$AZURE_TENANT_ID" ] || [ -z "$AZURE_SUBSCRIPTION_ID" ]; then
+            echo '::error::SharePoint OIDC requires AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID.'
+            exit 1
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci -w @pronoia/core -w @pronoia/cli --include-workspace-root
+      - run: npm run build -w @pronoia/core && npm run build -w @pronoia/cli
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: pronoia-audited-export
+          path: .pronoia-export
+      - name: Optional SharePoint workload identity
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Upload verified exports with manifest last
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node packages/cli/dist/index.js sharepoint-upload --out .pronoia-export

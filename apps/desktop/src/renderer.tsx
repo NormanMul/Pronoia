@@ -51,7 +51,9 @@ import {
 } from './renderer-state';
 import {
   analyseSchema,
+  errorSchema,
   evidencePreviewSchema,
+  exportSummarySchema,
   manualInputSchema,
   proposalSchema,
   publishEvidenceSchema,
@@ -320,6 +322,201 @@ function Modal({
         </DialogBody>
       </DialogSurface>
     </Dialog>
+  );
+}
+
+function ExportReview({
+  destination,
+  repository,
+  close,
+}: {
+  destination: string;
+  repository: string;
+  close: () => void;
+}) {
+  const text = useText();
+  const [reviewed, setReviewed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] =
+    useState<Reply<z.infer<typeof exportSummarySchema>>>();
+  const exporting = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const exportNow = async () => {
+    if (!reviewed || exporting.current) return;
+    exporting.current = true;
+    setBusy(true);
+    setResult(undefined);
+    try {
+      const reply = await api.exportNow({ reviewed: true });
+      const checked: Reply<z.infer<typeof exportSummarySchema>> = reply.ok
+        ? { ok: true, value: exportSummarySchema.parse(reply.value) }
+        : { ok: false, error: errorSchema.parse(reply.error) };
+      if (!mounted.current) return;
+      setResult(checked);
+      if (!checked.ok) setReviewed(false);
+    } catch (error) {
+      if (!mounted.current) return;
+      setResult({
+        ok: false,
+        error: {
+          code:
+            error instanceof z.ZodError
+              ? 'INVALID_EXPORT_RESPONSE'
+              : 'EXPORT_REQUEST_FAILED',
+          message:
+            error instanceof z.ZodError
+              ? text(
+                  'The desktop returned an invalid export result.',
+                  'Desktop mengembalikan hasil ekspor yang tidak valid.',
+                )
+              : error instanceof Error
+                ? error.message
+                : text(
+                    'The export request could not be confirmed.',
+                    'Permintaan ekspor tidak dapat dikonfirmasi.',
+                  ),
+        },
+      });
+      setReviewed(false);
+    } finally {
+      exporting.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      title={text('Review before export', 'Tinjau sebelum ekspor')}
+      close={close}
+    >
+      <p>
+        {text('GitHub board', 'Papan GitHub')}: {repository}
+      </p>
+      <label>
+        {text('Export destination', 'Tujuan ekspor')}
+        <Input
+          className="export-path"
+          aria-label={text('Export destination', 'Tujuan ekspor')}
+          readOnly
+          value={destination}
+        />
+      </label>
+      <p id="export-warning">
+        {text(
+          'The published GitHub board, evidence and recaps, and local AI decision log (accepted, edited and discarded, including discard reasons) can contain sensitive text. Check/redact this content before sharing. OneDrive/SharePoint may sync this folder automatically as soon as files are written.',
+          'Papan GitHub, bukti dan ringkasan yang diterbitkan, serta log keputusan AI lokal (diterima, disunting dan dibuang, termasuk alasan pembuangan) dapat berisi teks sensitif. Periksa/sunting konten ini sebelum berbagi. OneDrive/SharePoint dapat menyinkronkan folder ini secara otomatis segera setelah berkas ditulis.',
+        )}
+      </p>
+      <p>
+        {text(
+          'Raw audio, private session files, draft captures and unpublished transcript files are excluded. This exports files only; it does not change GitHub decisions.',
+          'Audio mentah, berkas sesi privat, draf tangkapan dan berkas transkrip yang belum diterbitkan tidak disertakan. Ini hanya mengekspor berkas; keputusan GitHub tidak diubah.',
+        )}
+      </p>
+      <div role="status" aria-live="polite" aria-atomic="true">
+        {busy && (
+          <p>
+            {text(
+              'Exporting reviewed data to the destination above. Pause and Stop remain available. Closing this dialog does not cancel the file export.',
+              'Mengekspor data yang ditinjau ke tujuan di atas. Jeda dan Berhenti tetap tersedia. Menutup dialog ini tidak membatalkan ekspor berkas.',
+            )}
+          </p>
+        )}
+        {result?.ok && (
+          <>
+            <strong>{text('Export complete', 'Ekspor selesai')}</strong>
+            <p>
+              {text('Generated at', 'Dibuat pada')}: {result.value.generatedAt}
+            </p>
+            <ul>
+              <li>
+                {text(
+                  `Findings: ${result.value.findings}`,
+                  `Temuan: ${result.value.findings}`,
+                )}
+              </li>
+              <li>
+                {text(
+                  `Evidence: ${result.value.evidence}`,
+                  `Bukti: ${result.value.evidence}`,
+                )}
+              </li>
+              <li>
+                {text(
+                  `Sessions: ${result.value.sessions}`,
+                  `Sesi: ${result.value.sessions}`,
+                )}
+              </li>
+              <li>
+                {text(
+                  `AI decisions: ${result.value.proposals}`,
+                  `Keputusan AI: ${result.value.proposals}`,
+                )}
+              </li>
+            </ul>
+            <label>
+              {text('Export location', 'Lokasi ekspor')}
+              <Input
+                className="export-path"
+                aria-label={text('Export location', 'Lokasi ekspor')}
+                readOnly
+                value={result.value.directory}
+              />
+            </label>
+          </>
+        )}
+      </div>
+      {result && !result.ok && (
+        <div role="alert" className="warning">
+          <strong>
+            {text('Export failed', 'Ekspor gagal')} ({result.error.code})
+          </strong>
+          <p>{result.error.message}</p>
+          <p>
+            {text(
+              'No successful export was confirmed. Check connection and destination permissions/free space in Settings, then review and try again. Restart the updated desktop if export is unavailable.',
+              'Belum ada ekspor berhasil yang dikonfirmasi. Periksa koneksi serta izin/ruang kosong tujuan di Pengaturan, lalu tinjau dan coba lagi. Mulai ulang desktop yang diperbarui jika ekspor tidak tersedia.',
+            )}
+          </p>
+        </div>
+      )}
+      {!result?.ok && (
+        <Checkbox
+          required
+          disabled={busy}
+          checked={reviewed}
+          aria-describedby="export-warning"
+          label={text(
+            'I reviewed the destination and sensitive text, including discard reasons, and consent to export to this folder (which may sync automatically).',
+            'Saya telah meninjau tujuan dan teks sensitif, termasuk alasan pembuangan, dan menyetujui ekspor ke folder ini (yang mungkin disinkronkan otomatis).',
+          )}
+          onChange={(_, data) => setReviewed(data.checked === true)}
+        />
+      )}
+      <div className="actions">
+        <Button onClick={close}>
+          {busy || result?.ok
+            ? text('Close', 'Tutup')
+            : text('Cancel', 'Batal')}
+        </Button>
+        {!result?.ok && (
+          <Button
+            appearance="primary"
+            disabled={!reviewed || busy}
+            onClick={() => void exportNow()}
+          >
+            {busy
+              ? text('Exporting...', 'Mengekspor...')
+              : text('Export', 'Ekspor')}
+          </Button>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -1674,6 +1871,7 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [form, setForm] = useState<z.infer<typeof settingsInputSchema>>();
   const [settingsBusy, setSettingsBusy] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [cards, setCards] = useState<Card[]>([]);
   const [captureSources, setSources] = useState<{ id: string; name: string }[]>(
     [],
@@ -1893,6 +2091,7 @@ function App() {
       review ||
       manual ||
       settingsOpen ||
+      exportOpen ||
       retryPending ||
       recapOpen
     )
@@ -2559,6 +2758,7 @@ function App() {
     selected ||
     manual ||
     settingsOpen ||
+    exportOpen ||
     retryPending ||
     (recapOpen && currentRecap !== undefined),
   );
@@ -2591,6 +2791,7 @@ function App() {
         phaseRef.current === 'active' &&
         !manual &&
         !settingsOpen &&
+        !exportOpen &&
         !retryPending &&
         !recapOpen
       )
@@ -2727,6 +2928,15 @@ function App() {
               label={text('Always on top', 'Selalu di atas')}
               onChange={() => void changeView('alwaysOnTop')}
             />
+            <Button
+              {...restoreFocusTarget}
+              disabled={!settings || settingsBusy || snapshotBusy.current}
+              onClick={() => {
+                if (!snapshotBusy.current) setExportOpen(true);
+              }}
+            >
+              {text('Export now', 'Ekspor sekarang')}
+            </Button>
             <Button
               {...restoreFocusTarget}
               onClick={() => setSettingsOpen(true)}
@@ -3509,6 +3719,14 @@ function App() {
                   : text('Post human command', 'Kirim perintah manusia')}
               </Button>
             </Modal>
+          )}
+          {exportOpen && settings && (
+            <ExportReview
+              key={`${settings.githubRepo}:${settings.exportDir}`}
+              destination={settings.exportDir}
+              repository={settings.githubRepo}
+              close={() => setExportOpen(false)}
+            />
           )}
           {settingsOpen && form && (
             <Modal

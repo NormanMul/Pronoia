@@ -1,0 +1,43 @@
+name: Reconcile optional Project mirror
+
+on:
+  schedule:
+    - cron: '0 1-11 * * 1-5'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: pronoia-project-mirror-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PRONOIA_PROJECT_TOKEN: ${{ secrets.PRONOIA_PROJECT_TOKEN }}
+    steps:
+      - name: Report disabled optional Project integration
+        if: env.PRONOIA_PROJECT_TOKEN == ''
+        run: echo 'Projects skipped; the separate PRONOIA_PROJECT_TOKEN is not configured.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: env.PRONOIA_PROJECT_TOKEN != ''
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: env.PRONOIA_PROJECT_TOKEN != ''
+        with:
+          node-version: '22'
+          cache: npm
+      - if: env.PRONOIA_PROJECT_TOKEN != ''
+        run: npm ci -w @pronoia/core -w @pronoia/cli --include-workspace-root
+      - if: env.PRONOIA_PROJECT_TOKEN != ''
+        run: npm run build -w @pronoia/core && npm run build -w @pronoia/cli
+      - name: Restore Stage from trusted issue audits, never issue labels
+        if: env.PRONOIA_PROJECT_TOKEN != ''
+        run: node packages/cli/dist/index.js project-reconcile

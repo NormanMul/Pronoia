@@ -69,6 +69,10 @@ it.each([
   ['sync-security', '--issue', '1'],
   ['verify-on-merge', '--pull', '9', '--issue', '1'],
   ['ai', '--issue', '1'],
+  ['export-publish'],
+  ['integration-sync', '--issue', '1'],
+  ['project-reconcile'],
+  ['sharepoint-upload', '--out', 'synthetic-exports'],
 ])(
   'rejects local authoritative/AI operation %s before using credentials',
   (...args) => {

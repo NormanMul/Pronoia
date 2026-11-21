@@ -46,6 +46,7 @@ export const reviewedActionSchema = z.discriminatedUnion('kind', [
       capture: snapshotSchema,
       proposal: proposalSchema,
       outcome: z.enum(['accepted', 'edited']),
+      publication_version: z.literal(2).optional(),
     })
     .strict(),
   actionBase

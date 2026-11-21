@@ -52,6 +52,7 @@ import {
   type Role,
   type RoleInput,
   type RoleOutput,
+  exportBoard,
 } from '@pronoia/core';
 import {
   audioSchema,
@@ -96,6 +97,8 @@ import {
   pendingReviewText,
   postReviewedComment,
   PublicationLock,
+  proposalLog,
+  proposalMarker,
 } from './publication';
 import { formatRecap } from './recap';
 
@@ -1144,18 +1147,15 @@ async function recordOutcome(
   const existing = journal.state.outcomes.find(
     (entry) => entry.id === queued.id,
   );
-  const clean = {
-    ...proposal,
-    observed: redactText(proposal.observed),
-    reason: redactText(proposal.reason),
-    remediation: proposal.remediation.map(redactText),
-    evidence_note: redactText(proposal.evidence_note),
-    verbal_decision: {
-      ...proposal.verbal_decision,
-      speaker: redactText(proposal.verbal_decision.speaker),
-      quote: redactText(proposal.verbal_decision.quote),
-    },
-  };
+  let proposalText = '[unpublished local proposal]';
+  if (outcome !== 'discarded') {
+    if (!action || action.kind !== 'proposal')
+      throw new DesktopError(
+        'PROPOSAL_LOG',
+        'A published decision needs its original reviewed action.',
+      );
+    proposalText = proposalLog(action).proposal;
+  }
   const record: ProposalOutcome = {
     id: queued.id,
     at: existing?.at ?? action?.at ?? new Date().toISOString(),
@@ -1163,10 +1163,7 @@ async function recordOutcome(
     session: action?.session ?? currentSession().id,
     agent: 'Analyst',
     issue: proposal.issue,
-    proposal:
-      outcome === 'discarded'
-        ? '[unpublished local proposal]'
-        : JSON.stringify(clean),
+    proposal: proposalText,
     proposedCommand: proposal.proposed_command,
     confidence: proposal.confidence,
     outcome,
@@ -1514,6 +1511,7 @@ async function runPublication(
             ? `Remediation:\n${action.proposal.remediation.map((step) => `- ${publicationText(step)}`).join('\n')}`
             : '',
           `AI-assisted, human-confirmed by @${action.actor}.`,
+          action.kind === 'proposal' ? proposalMarker(action) : '',
         ]
           .filter(Boolean)
           .join('\n\n');
@@ -1944,6 +1942,29 @@ function registerBaseHandlers() {
   const empty = z.object({}).strict();
   register('settings', empty, publicSettings);
   register('save-settings', settingsInputSchema, saveSettings);
+  register(
+    'export-now',
+    z.object({ reviewed: z.literal(true) }).strict(),
+    async () => {
+      if (starting || recapController)
+        throw new DesktopError(
+          'SESSION_ACTIVE',
+          'Wait for session preparation or recap generation before exporting.',
+        );
+      return publicationLock.run(async () => {
+        await refreshBoard();
+        const result = await exportBoard(board(), settings.exportDir);
+        return {
+          directory: path.join(result.directory, 'latest'),
+          generatedAt: result.manifest.generated_at,
+          findings: result.manifest.row_counts['findings.csv'],
+          evidence: result.manifest.row_counts['evidence.csv'],
+          sessions: result.manifest.row_counts['sessions.csv'],
+          proposals: result.manifest.row_counts['ai-proposals.csv'],
+        };
+      });
+    },
+  );
   register('board', empty, refreshBoard);
   register(
     'item',
@@ -2189,6 +2210,7 @@ function registerBaseHandlers() {
     return runPublication(async () => ({
       ...(await actionBase(input.id, active.input.synthetic)),
       kind: 'proposal',
+      publication_version: 2,
       issue: input.issue,
       capture,
       proposal: input.proposal,

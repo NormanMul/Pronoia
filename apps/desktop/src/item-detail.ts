@@ -4,21 +4,12 @@ import {
   isAuditWriter,
   readAudit,
   readMeta,
+  issueSection,
   type Config,
   type Issue,
   type IssueComment,
 } from '@pronoia/core';
 import { itemDetailSchema, type Card, type ItemDetail } from './shared';
-
-function section(body: string, title: string): string {
-  return (
-    body
-      .split(/^## /m)
-      .find((entry) => entry.startsWith(`${title}\n`))
-      ?.slice(title.length + 1)
-      .trim() ?? ''
-  );
-}
 
 export function buildCard(
   issue: Issue,
@@ -111,13 +102,14 @@ export function buildItemDetail(
   }
   return itemDetailSchema.parse({
     card: buildCard(issue, comments, config),
-    test: meta?.test_description || section(issue.body, 'Test'),
-    procedure: meta?.procedure || section(issue.body, 'Procedure'),
-    expected: meta?.expected_result || section(issue.body, 'Expected result'),
-    actual: meta?.actual_result || section(issue.body, 'Actual result'),
+    test: meta?.test_description || issueSection(issue.body, 'Test'),
+    procedure: meta?.procedure || issueSection(issue.body, 'Procedure'),
+    expected:
+      meta?.expected_result || issueSection(issue.body, 'Expected result'),
+    actual: meta?.actual_result || issueSection(issue.body, 'Actual result'),
     remediation: meta?.remediation.length
       ? meta.remediation
-      : section(issue.body, 'Remediation')
+      : issueSection(issue.body, 'Remediation')
           .split('\n')
           .map((step) => step.replace(/^[-*]\s*(?:\[[ x]\]\s*)?/, '').trim())
           .filter(Boolean),

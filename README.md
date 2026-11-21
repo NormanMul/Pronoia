@@ -5,11 +5,11 @@ the authoritative assessment board and comment commands provide the audit trail.
 
 ## Implementation status
 
-M0–M2 provide the governed board, recoverable comment commands, validated native
+M0–M3 provide the governed board, recoverable comment commands, validated native
 alerts/SARIF, cached enrichment and SLAs, direct Foundry role/audio adapters and
 reviewable AI/Copilot integrations. Live Foundry credentials/deployments are
-configured separately. The desktop co-pilot is described below; full reporting,
-Cowork/MCP integrations and Power BI remain later milestones.
+configured separately. The desktop and reporting/agent interfaces are described
+below. Power BI and the final verified release remain later milestones.
 
 | Milestone | Deliverable                                                   |
 | --------- | ------------------------------------------------------------- |
@@ -104,6 +104,31 @@ The English/Bahasa UI includes presenter/compact views, live captions, proposals
 in-app evidence and audit trails, per-step remediation evidence and human dispute
 dialogs. Publication retries restore stopped, reviewed work rather than recapture.
 See [desktop operation and limits](docs/desktop.md).
+
+## Reporting and safe agents
+
+```powershell
+node .\packages\cli\dist\index.js board-list --status validate
+node .\packages\cli\dist\index.js item-get --issue 1
+node .\packages\cli\dist\index.js export --out "<approved-folder>"
+```
+
+Desktop **Export now** requires explicit human review. The shared exporter
+reconstructs audit state/history, verifies PNG hashes and writes six CSVs,
+referenced evidence/recaps and a checksummed manifest into `latest` and a dated
+snapshot. Local accepted/edited/discarded AI decision rows are preserved; private
+audio, draft captures and unpublished transcript files are not collected.
+
+[Cowork handoff](docs/cowork/README.md) contains weekly Word/Excel/email-draft
+and meeting prompts, OneDrive paths and Task Scheduler instructions. Every send,
+including a no-change note, waits for a real human.
+
+The built stdio MCP server exposes seven safe tools. Use the checked-in VS Code
+configuration or [Scout configuration and limits](docs/scout.md); build first.
+Agents always carry their own marker and cannot approve, reject, dispute,
+confirm or close issues. MCP tool approval does not bypass GitHub governance.
+Tenant permissions, Projects, Teams and SharePoint remain explicit optional
+configuration; file creation alone does not establish live integration readiness.
 
 ## Safety
 

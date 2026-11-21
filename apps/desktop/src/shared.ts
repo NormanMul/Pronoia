@@ -5,6 +5,16 @@ export const errorSchema = z
   .strict();
 export type Reply<T> =
   { ok: true; value: T } | { ok: false; error: z.infer<typeof errorSchema> };
+export const exportSummarySchema = z
+  .object({
+    directory: z.string().min(1),
+    generatedAt: z.iso.datetime(),
+    findings: z.number().int().nonnegative(),
+    evidence: z.number().int().nonnegative(),
+    sessions: z.number().int().nonnegative(),
+    proposals: z.number().int().nonnegative(),
+  })
+  .strict();
 export const phaseSchema = z.enum([
   'idle',
   'starting',
@@ -308,6 +318,9 @@ export type ItemDetail = z.infer<typeof itemDetailSchema>;
 
 export interface PronoiaApi {
   settings(): Promise<Reply<Settings>>;
+  exportNow(input: {
+    reviewed: true;
+  }): Promise<Reply<z.infer<typeof exportSummarySchema>>>;
   saveSettings(
     input: z.infer<typeof settingsInputSchema>,
   ): Promise<Reply<Settings>>;

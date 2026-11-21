@@ -49,7 +49,7 @@ function ownSample(findings: Finding[]): boolean {
   );
 }
 
-function actionsOnly(): void {
+export function actionsOnly(): void {
   if (process.env.GITHUB_ACTIONS !== 'true' || !process.env.GITHUB_TOKEN)
     throw new Error(
       'Authoritative operations require GitHub Actions and its GITHUB_TOKEN.',

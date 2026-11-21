@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "pronoia": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}\\packages\\mcp\\dist\\index.js"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PRONOIA_AGENT_NAME": "pronoia-scout"
+      }
+    }
+  }
+}

@@ -85,6 +85,11 @@ refused during publication, including its asynchronous preflight.
 Local proposal decisions project to `ai-proposals.csv`; published evidence goes
 to `evidence/<issue>/`, and recaps to `sessions/` with `sessions.csv`.
 Existing local decisions are preserved. The full M4 export workflow is separate.
+Use **Export now** after reviewing the destination and local decision log.
+The shared exporter creates `latest` and dated snapshots with six CSVs, published
+recaps, SHA-verified evidence and a manifest; it never exports private audio,
+capture drafts or unpublished transcript files. A OneDrive destination may sync
+automatically, so the confirmation is a real sharing decision.
 
 Retention defaults to 30 days, checked at startup and daily. Raw audio is not
 retained at all. Expired private proposal outcomes and Pronoia-owned

@@ -115,6 +115,17 @@ export function readMeta(body: string): IssueMeta | null {
   return metaSchema.parse(JSON.parse(json));
 }
 
+export function issueSection(body: string, title: string): string {
+  return (
+    body
+      .replaceAll('\r\n', '\n')
+      .split(/^## /m)
+      .find((entry) => entry.startsWith(`${title}\n`))
+      ?.slice(title.length + 1)
+      .trim() ?? ''
+  );
+}
+
 export function assessmentRows(csv: string): AssessmentRow[] {
   const [headers, ...rows] = parseCsv(csv);
   if (

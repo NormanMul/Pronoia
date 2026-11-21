@@ -206,16 +206,28 @@ export class Board {
   async importAssessment(
     rows: AssessmentRow[],
     assessment: string,
-    options: { dryRun?: boolean; synthetic?: boolean; milestone?: string },
+    options: {
+      dryRun?: boolean;
+      synthetic?: boolean;
+      milestone?: string;
+      agent?: string;
+    },
   ): Promise<{ created: number; planned: number }> {
+    if (options.agent)
+      z.string()
+        .regex(/^[A-Za-z0-9_-]{1,60}$/)
+        .parse(options.agent);
     const milestoneTitle = options.milestone || assessment;
     const bodies = rows.map((row) => {
       const body = issueBody(row, assessment, options.synthetic);
       const meta = readMeta(body);
       if (!meta) throw new Error('Missing validated assessment metadata.');
-      return body.replace(/<!-- pronoia:meta .*? -->/s, () =>
+      const updated = body.replace(/<!-- pronoia:meta .*? -->/s, () =>
         marker('meta', { ...meta, milestone: milestoneTitle }),
       );
+      return options.agent
+        ? `${updated}\n\n${marker('agent', { agent: options.agent })}`
+        : updated;
     });
     if (options.dryRun) return { created: 0, planned: rows.length };
     if ((await this.isPublic()) && !options.synthetic) {

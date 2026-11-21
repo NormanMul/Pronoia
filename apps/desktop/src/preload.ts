@@ -4,6 +4,7 @@ import {
   cardSchema,
   errorSchema,
   eventSchema,
+  exportSummarySchema,
   itemDetailSchema,
   publicSettingsSchema,
   queuedProposalSchema,
@@ -38,6 +39,7 @@ async function invoke<T>(
 const nothing = z.undefined();
 const api: PronoiaApi = {
   settings: () => invoke('settings', {}, publicSettingsSchema),
+  exportNow: (input) => invoke('export-now', input, exportSummarySchema),
   saveSettings: (input) => invoke('save-settings', input, publicSettingsSchema),
   board: () =>
     invoke(

@@ -1,8 +1,53 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { commentSchema, marker, type Board } from '@pronoia/core';
-import { DesktopError } from './safety';
+import {
+  commentSchema,
+  marker,
+  proposalOutcomeSchema,
+  type Board,
+  type ProposalExport,
+} from '@pronoia/core';
+import { DesktopError, redactText } from './safety';
 import type { ReviewedAction } from './local-review';
+
+export function proposalLog(
+  action: Extract<ReviewedAction, { kind: 'proposal' }>,
+): ProposalExport {
+  const proposal = action.proposal;
+  const clean = {
+    ...proposal,
+    observed: redactText(proposal.observed),
+    reason: redactText(proposal.reason),
+    remediation: proposal.remediation.map(redactText),
+    evidence_note: redactText(proposal.evidence_note),
+    verbal_decision: {
+      ...proposal.verbal_decision,
+      speaker: redactText(proposal.verbal_decision.speaker),
+      quote: redactText(proposal.verbal_decision.quote),
+    },
+  };
+  return proposalOutcomeSchema.parse({
+    id: action.id,
+    at: action.at,
+    session: action.session,
+    agent: 'Analyst',
+    issue: action.issue,
+    proposal: JSON.stringify(clean),
+    proposed_command: proposal.proposed_command,
+    confidence: proposal.confidence,
+    outcome: action.outcome,
+    reviewer: action.actor,
+    reason: redactText(proposal.reason),
+  });
+}
+
+export function proposalMarker(
+  action: Extract<ReviewedAction, { kind: 'proposal' }>,
+): string {
+  return action.publication_version === 2
+    ? marker('ai-proposal', proposalLog(action))
+    : '';
+}
 
 export class PublicationLock {
   private active = false;

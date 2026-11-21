@@ -18,7 +18,7 @@
     "typecheck": "npm run build -w @pronoia/core && tsc --noEmit && npm run typecheck -w @pronoia/desktop",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "build": "npm run build -w @pronoia/core && npm run build -w @pronoia/cli && npm run build -w @pronoia/desktop",
+    "build": "npm run build -w @pronoia/core && npm run build -w @pronoia/cli && npm run build -w @pronoia/mcp && npm run build -w @pronoia/desktop",
     "pronoia": "node packages/cli/dist/index.js",
     "demo:seed": "node packages/cli/dist/index.js demo-seed",
     "test:desktop": "playwright test --config playwright.config.ts",

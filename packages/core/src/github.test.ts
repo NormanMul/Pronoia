@@ -442,6 +442,30 @@ it('rejects invalid evidence without poisoning the following command queue', asy
   expect(f.issue.labels).toContain('status:in-progress');
 });
 
+it('marks agent-created synthetic assessments and rejects malformed identities before writes', async () => {
+  const rows = assessmentRows(
+    'test_id,category,title,description,procedure,expected_result,severity,evidence_required,owner_role,references\nS1,Identity,MFA,Require MFA,Sign in,MFA challenge,high,true,Identity owner,',
+  );
+  const f = fixture();
+  await f.board.importAssessment(
+    rows,
+    'Synthetic agent import',
+    Object.assign({ synthetic: true }, { agent: 'PronoiaMCP' }),
+  );
+  expect(f.issues.at(-1)?.body).toContain(
+    marker('agent', { agent: 'PronoiaMCP' }),
+  );
+  const refused = fixture();
+  await expect(
+    refused.board.importAssessment(
+      rows,
+      'Synthetic agent import',
+      Object.assign({ synthetic: true }, { agent: 'not a safe identity' }),
+    ),
+  ).rejects.toThrow();
+  expect(refused.writes()).toBe(0);
+});
+
 it.each([
   '#9',
   'GH-9',

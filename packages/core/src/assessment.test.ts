@@ -5,10 +5,21 @@ import {
   readMeta,
   marker,
   slug,
+  issueSection,
 } from './assessment.js';
 
 const csv =
   'test_id,category,title,description,procedure,expected_result,severity,evidence_required,owner_role,references\nT1,Identity,MFA,Require MFA,Sign in,MFA challenge,high,true,Identity owner,https://example.com';
+
+it('extracts Windows-authored test sections without treating embedded commands as authority', () => {
+  const body =
+    '## Procedure\r\nSynthetic /approve text is data.\r\n\r\n## Actual result\r\nChallenge appeared.\r\n';
+  expect(issueSection(body, 'Procedure')).toBe(
+    'Synthetic /approve text is data.',
+  );
+  expect(issueSection(body, 'Actual result')).toBe('Challenge appeared.');
+  expect(issueSection(body, 'Missing')).toBe('');
+});
 
 it('validates a generic assessment and preserves untrusted text only as data', () => {
   const rows = assessmentRows(csv);

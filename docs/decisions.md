@@ -223,3 +223,40 @@ false`. Only `github-actions[bot]` may author authoritative audit/result
   the actual Electron MediaRecorder, transcribed by a live Entra-authenticated
   deployment. Batch and PCM24k realtime both recognized all eight expected
   vocabulary terms. Other model deployments and assessment statuses were unchanged.
+
+## ADR 020: Safe MCP through the shared CLI
+
+- Status: accepted, 2026-11-21.
+- Decision: use the specification's MIT MCP SDK 1.32.2 rather than silently
+  substituting the split v2 packages shown in current tutorials. The stdio server
+  forwards strict validated arguments through the shared CLI without a shell.
+  Agent identity is mandatory for write paths; human-only commands are refused
+  before execution. No stdout logging is mixed with JSON-RPC.
+- Reason: reuse workflow authorization and the audited GitHub command path
+  instead of creating a second status engine. Configuration contains no tokens.
+
+## ADR 021: Exact replay exports and managed snapshots
+
+- Status: accepted, 2026-11-21.
+- Decision: share six CSV contracts and a versioned manifest. Rebuild state and
+  history from trusted Actions audits, verify referenced PNG bytes and hashes,
+  preserve published recaps and local reviewed decision outcomes. Accepted/edited
+  proposals publish a redacted data marker, never an authority marker.
+- Managed `latest` and dated output directories are staged before replacement;
+  unknown directories, links, changed files and escaping paths are refused.
+  Git publication uses the exports branch without force and preserves prior
+  dated snapshots. The manifest excludes its own recursive checksum.
+- Privacy: no raw audio, private capture files or unpublished transcript files
+  are collected. Cloud jobs cannot infer private discarded outcomes; local
+  logs are explicitly supplied/confirmed by the human operator.
+
+## ADR 022: Every Cowork send requires a human
+
+- Status: accepted, 2026-11-21.
+- Decision: the weekly prompt creates Word/Excel/email drafts and a no-change
+  note, but sends neither automatically. The specification's no-change
+  "send only me" line is interpreted as a draft awaiting approval because the
+  stronger human-only sending rule applies to every message.
+- Meeting statements remain observations. Scheduling, tenant permissions,
+  approved storage and the actual sending approval are manual configuration,
+  not capabilities claimed merely because prompt files exist.

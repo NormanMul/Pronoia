@@ -74,6 +74,9 @@ input[type='checkbox'] {
 .public-warning {
   font-weight: 600;
 }
+.export-path {
+  width: 100%;
+}
 .scope-selector fieldset {
   max-height: 260px;
   overflow: auto;

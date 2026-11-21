@@ -7,11 +7,24 @@ import {
 } from '@playwright/test';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { delimiter, dirname, resolve } from 'node:path';
 import { z } from 'zod';
+import { parseCsv, stringifyCsv } from '@pronoia/core';
+import {
+  exportHeaders,
+  exportManifestSchema,
+} from '../../../packages/core/src/export-contract';
+import { exportSummarySchema } from '../src/shared';
 
 const syntheticPng =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=';
@@ -212,6 +225,7 @@ async function syntheticDesktop(
         phase: 'stopped',
         session: fixture.session,
         staleRecapOnce: false,
+        resolveExport: undefined as ((reply: unknown) => void) | undefined,
       };
       Object.assign(globalThis, { pronoiaSynthetic: state });
       const ok = (value: unknown) => ({ ok: true, value });
@@ -221,6 +235,7 @@ async function syntheticDesktop(
       );
       for (const action of [
         'settings',
+        'export-now',
         'sources',
         'board',
         'item',
@@ -270,6 +285,10 @@ async function syntheticDesktop(
           switch (action) {
             case 'settings':
               return ok(fixture.settings);
+            case 'export-now':
+              return new Promise((resolve) => {
+                state.resolveExport = resolve;
+              });
             case 'sources':
               return ok([{ id: 'synthetic-screen', name: 'Synthetic screen' }]);
             case 'board':
@@ -465,6 +484,7 @@ async function syntheticDesktop(
     page,
     pendingId,
     exportDir,
+    privateDir: resolve(root, 'pronoia'),
     sessionA: fixture.session,
     sessionB: fixture.nextSession,
     calls: () =>
@@ -506,6 +526,443 @@ async function consent(page: Page) {
     })
     .check();
 }
+
+test('real IPC exports only reviewed published data and local AI decisions, never private drafts', async () => {
+  const fixture = await syntheticDesktop(false, 'none', true);
+  try {
+    expect(
+      await fixture.page.evaluate(() => typeof window.pronoia.exportNow),
+      'The actual packaged preload must expose the export IPC.',
+    ).toBe('function');
+    await fixture.application.evaluate(() => {
+      const at = new Date().toISOString();
+      const requests: { method: string; path: string }[] = [];
+      Object.assign(globalThis, { pronoiaExportRequests: requests });
+      globalThis.fetch = async (input, init) => {
+        const url = new URL(
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input.url,
+        );
+        const method =
+          init?.method || (input instanceof Request ? input.method : 'GET');
+        requests.push({ method, path: url.pathname });
+        if (url.hostname !== 'api.github.com' || method !== 'GET')
+          throw new Error('Only synthetic GitHub reads are allowed.');
+        if (url.pathname === '/user')
+          return Response.json({ login: 'synthetic-operator', type: 'User' });
+        if (url.pathname === '/repos/NormanMul/Pronoia')
+          return Response.json({ private: false });
+        if (url.pathname === '/repos/NormanMul/Pronoia/issues')
+          return Response.json([
+            {
+              number: 7,
+              title: 'Contoso synthetic published finding',
+              body: 'Published synthetic board data only.',
+              labels: [
+                'pronoia',
+                'status:todo',
+                'assessment:contoso-synthetic',
+                'severity:high',
+                'source:manual',
+              ],
+              assignees: [],
+              state: 'open',
+              html_url: 'https://github.com/NormanMul/Pronoia/issues/7',
+              created_at: at,
+              updated_at: at,
+            },
+          ]);
+        if (url.pathname === '/repos/NormanMul/Pronoia/issues/7/comments')
+          return Response.json([]);
+        if (url.pathname === '/repos/NormanMul/Pronoia/contents/sessions')
+          return Response.json(
+            { message: 'No published synthetic recaps.' },
+            { status: 404 },
+          );
+        throw new Error(`Unexpected synthetic HTTP: ${method} ${url.pathname}`);
+      };
+    });
+    const saved = await fixture.page.evaluate(async (exportDir) => {
+      const loaded = await window.pronoia.settings();
+      if (!loaded.ok) throw new Error(loaded.error.message);
+      const { hasKey, hasGitHubToken, ...settings } = loaded.value;
+      void hasKey;
+      void hasGitHubToken;
+      return window.pronoia.saveSettings({
+        ...settings,
+        githubRepo: 'NormanMul/Pronoia',
+        exportDir,
+        githubToken: 'local-synthetic-token-not-a-secret',
+      });
+    }, fixture.exportDir);
+    expect(saved.ok).toBe(true);
+    const refused = await fixture.page.evaluate(() => {
+      // @ts-expect-error Exercise the real consent boundary with invalid runtime input.
+      return window.pronoia.exportNow({ reviewed: false });
+    });
+    expect(refused).toMatchObject({
+      ok: false,
+      error: { code: 'INVALID_INPUT' },
+    });
+    expect(await readdir(fixture.exportDir)).toEqual([]);
+
+    const privateText = 'PRIVATE_SYNTHETIC_NOT_FOR_EXPORT';
+    const privateFiles = [
+      resolve(fixture.privateDir, 'sessions', `${randomUUID()}.json`),
+      resolve(fixture.privateDir, 'raw-audio.wav'),
+      resolve(fixture.privateDir, 'captures', 'draft.png'),
+      resolve(fixture.privateDir, 'unpublished-transcript.txt'),
+    ];
+    for (const file of privateFiles) {
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, privateText);
+    }
+    const at = new Date().toISOString();
+    await writeFile(
+      resolve(fixture.exportDir, 'ai-proposals.csv'),
+      stringifyCsv([
+        exportHeaders['ai-proposals.csv'],
+        ...(['accepted', 'edited', 'discarded'] as const).map((outcome) => [
+          at,
+          randomUUID(),
+          'Analyst',
+          7,
+          `Contoso synthetic ${outcome} proposal`,
+          'none',
+          0.75,
+          outcome,
+          'synthetic-operator',
+          `Synthetic ${outcome} reason`,
+        ]),
+      ]),
+    );
+    const reply = await fixture.page.evaluate(() =>
+      window.pronoia.exportNow({ reviewed: true }),
+    );
+    expect(reply).toMatchObject({ ok: true });
+    if (!reply.ok)
+      throw new Error(`${reply.error.code}: ${reply.error.message}`);
+    const summary = exportSummarySchema.parse(reply.value);
+    expect(summary).toEqual({
+      directory: resolve(fixture.exportDir, 'latest'),
+      generatedAt: expect.any(String),
+      findings: 1,
+      evidence: 0,
+      sessions: 0,
+      proposals: 3,
+    });
+    const csvFiles = Object.keys(exportHeaders).sort();
+    const expectedFiles = [...csvFiles, 'manifest.json'].sort();
+    const latest = resolve(fixture.exportDir, 'latest');
+    const dated = resolve(fixture.exportDir, summary.generatedAt.slice(0, 10));
+    expect(await readdir(latest)).toEqual(expectedFiles);
+    expect(await readdir(dated)).toEqual(expectedFiles);
+    const manifest = exportManifestSchema.parse(
+      JSON.parse(await readFile(resolve(latest, 'manifest.json'), 'utf8')),
+    );
+    expect(manifest.generated_at).toBe(summary.generatedAt);
+    expect(manifest.row_counts).toEqual({
+      'findings.csv': 1,
+      'decisions.csv': 0,
+      'evidence.csv': 0,
+      'sessions.csv': 0,
+      'ai-proposals.csv': 3,
+      'status-history.csv': 5,
+    });
+    expect(Object.keys(manifest.sha256).sort()).toEqual(csvFiles);
+    for (const [file, headers] of Object.entries(exportHeaders)) {
+      const bytes = await readFile(resolve(latest, file));
+      expect(createHash('sha256').update(bytes).digest('hex')).toBe(
+        manifest.sha256[file as keyof typeof exportHeaders],
+      );
+      expect(parseCsv(bytes.toString('utf8'))[0]).toEqual(headers);
+      expect(bytes.toString('utf8')).not.toContain(privateText);
+      expect(await readFile(resolve(dated, file))).toEqual(bytes);
+    }
+    const proposals = parseCsv(
+      await readFile(resolve(latest, 'ai-proposals.csv'), 'utf8'),
+    ).slice(1);
+    expect(proposals.map((row) => row[7]).sort()).toEqual([
+      'accepted',
+      'discarded',
+      'edited',
+    ]);
+    expect(proposals.find((row) => row[7] === 'discarded')?.[9]).toBe(
+      'Synthetic discarded reason',
+    );
+    for (const file of privateFiles)
+      expect(await readFile(file, 'utf8')).toBe(privateText);
+    const requests = await fixture.application.evaluate(
+      () =>
+        (
+          globalThis as typeof globalThis & {
+            pronoiaExportRequests: { method: string; path: string }[];
+          }
+        ).pronoiaExportRequests,
+    );
+    expect(requests.length).toBeGreaterThan(0);
+    expect(requests.every((request) => request.method === 'GET')).toBe(true);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('requires bilingual Export now review before invoking in normal and presenter views', async () => {
+  const fixture = await syntheticDesktop(false, 'none');
+  try {
+    const { page } = fixture;
+    const opener = page.getByRole('button', {
+      name: 'Export now',
+      exact: true,
+    });
+    await expect(opener).toBeVisible();
+    await opener.focus();
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('dialog', { name: 'Review before export' });
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.getByRole('textbox', { name: 'Export destination' }),
+    ).toHaveValue(fixture.exportDir);
+    await expect(dialog).toContainText('discard reasons');
+    await expect(dialog).toContainText('sensitive text');
+    await expect(dialog).toContainText('OneDrive/SharePoint');
+    const reviewed = dialog.getByRole('checkbox', {
+      name: /I reviewed the destination and sensitive text/,
+    });
+    await expect(reviewed).not.toBeChecked();
+    await expect(reviewed).toHaveAttribute('required');
+    await expect(
+      dialog.getByRole('button', { name: 'Export', exact: true }),
+    ).toBeDisabled();
+    await expect(
+      dialog.getByRole('button', { name: 'Stop', exact: true }),
+    ).toBeVisible();
+    const focusableCount = await dialog
+      .locator('button:not([disabled]),input:not([disabled])')
+      .count();
+    for (let index = 0; index < focusableCount * 2 + 2; index += 1) {
+      await page.keyboard.press('Tab');
+      expect(
+        await dialog.evaluate((element) =>
+          element.contains(document.activeElement),
+        ),
+      ).toBe(true);
+    }
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(opener).toBeFocused();
+    expect(
+      (await fixture.calls()).filter(
+        (call) => call.channel === 'pronoia:export-now',
+      ),
+    ).toEqual([]);
+    await page
+      .getByRole('button', { name: 'Presenter view', exact: true })
+      .click();
+    await page
+      .getByRole('combobox', { name: 'UI language' })
+      .selectOption('id');
+    const idOpener = page.getByRole('button', {
+      name: 'Ekspor sekarang',
+      exact: true,
+    });
+    await idOpener.focus();
+    await page.keyboard.press('Enter');
+    const idDialog = page.getByRole('dialog', {
+      name: 'Tinjau sebelum ekspor',
+    });
+    await expect(
+      idDialog.getByRole('textbox', { name: 'Tujuan ekspor' }),
+    ).toHaveValue(fixture.exportDir);
+    await expect(idDialog).toContainText('alasan pembuangan');
+    await expect(idDialog).toContainText('OneDrive/SharePoint');
+    await expect(
+      idDialog.getByRole('checkbox', {
+        name: /Saya telah meninjau tujuan dan teks sensitif/,
+      }),
+    ).not.toBeChecked();
+    await expect(
+      idDialog.getByRole('button', { name: 'Ekspor', exact: true }),
+    ).toBeDisabled();
+    await expect(
+      idDialog.getByRole('button', { name: 'Berhenti', exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(idOpener).toBeFocused();
+    expect(
+      (await fixture.calls()).filter(
+        (call) => call.channel === 'pronoia:export-now',
+      ),
+    ).toEqual([]);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('keeps Stop reachable during export progress, shows typed errors and ignores dismissed replies', async () => {
+  const fixture = await syntheticDesktop(false, 'none');
+  const finishExport = (reply: unknown) =>
+    fixture.application.evaluate((_, reply) => {
+      const pending = (
+        globalThis as typeof globalThis & {
+          pronoiaSynthetic: {
+            resolveExport?: (reply: unknown) => void;
+          };
+        }
+      ).pronoiaSynthetic.resolveExport;
+      if (!pending) throw new Error('No synthetic export is pending.');
+      pending(reply);
+    }, reply);
+  try {
+    const { page } = fixture;
+    await expect(
+      page.getByRole('button', { name: 'Export now', exact: true }),
+    ).toBeVisible();
+    await consent(page);
+    await page
+      .getByRole('checkbox', { name: 'Microphone (You)', exact: true })
+      .uncheck();
+    await page
+      .getByRole('checkbox', {
+        name: 'System audio (Meeting; Windows is system-wide)',
+        exact: true,
+      })
+      .uncheck();
+    await page
+      .getByRole('button', { name: 'Start consented session', exact: true })
+      .click();
+    await page.getByRole('button', { name: 'Export now', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Review before export' });
+    await dialog
+      .getByRole('checkbox', {
+        name: /I reviewed the destination and sensitive text/,
+      })
+      .check();
+    await dialog.getByRole('button', { name: 'Export', exact: true }).click();
+    await expect(dialog.getByRole('status')).toContainText(
+      'Exporting reviewed data',
+    );
+    await expect(
+      dialog.getByRole('button', { name: 'Pause / Private', exact: true }),
+    ).toBeEnabled();
+    await expect(
+      dialog.getByRole('button', { name: 'Stop', exact: true }),
+    ).toBeEnabled();
+    await dialog
+      .getByRole('button', { name: 'Pause / Private', exact: true })
+      .click();
+    await expect(dialog).toContainText('Private / Paused');
+    await dialog.getByRole('button', { name: 'Stop', exact: true }).click();
+    await expect(dialog).toContainText('Not capturing');
+    await finishExport({
+      ok: false,
+      error: {
+        code: 'EXPORT_PATH',
+        message: 'Choose a writable export folder in Settings.',
+      },
+    });
+    await expect(dialog.getByRole('alert')).toContainText('EXPORT_PATH');
+    await expect(dialog.getByRole('alert')).toContainText(
+      'Choose a writable export folder in Settings.',
+    );
+    await expect(
+      dialog.getByRole('checkbox', {
+        name: /I reviewed the destination and sensitive text/,
+      }),
+    ).not.toBeChecked();
+    await expect(
+      dialog.getByRole('button', { name: 'Export', exact: true }),
+    ).toBeDisabled();
+    await expect(
+      dialog.getByText('Export complete', { exact: true }),
+    ).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+    await page
+      .getByRole('button', { name: 'Presenter view', exact: true })
+      .click();
+    await page
+      .getByRole('combobox', { name: 'UI language' })
+      .selectOption('id');
+    const openExport = () =>
+      page
+        .getByRole('button', { name: 'Ekspor sekarang', exact: true })
+        .click();
+    await openExport();
+    const idDialog = page.getByRole('dialog', {
+      name: 'Tinjau sebelum ekspor',
+    });
+    const idReviewed = idDialog.getByRole('checkbox', {
+      name: /Saya telah meninjau tujuan dan teks sensitif/,
+    });
+    await expect(idReviewed).not.toBeChecked();
+    await idReviewed.check();
+    await idDialog.getByRole('button', { name: 'Ekspor', exact: true }).click();
+    await expect(idDialog.getByRole('status')).toContainText(
+      'Mengekspor data yang ditinjau',
+    );
+    await idDialog
+      .getByRole('button', { name: 'Tutup dialog', exact: true })
+      .click();
+    const success = {
+      ok: true,
+      value: {
+        directory: resolve(fixture.exportDir, 'latest'),
+        generatedAt: '2026-11-21T04:00:00Z',
+        findings: 2,
+        evidence: 1,
+        sessions: 1,
+        proposals: 3,
+      },
+    };
+    await finishExport(success);
+    await expect(idDialog).toBeHidden();
+    await expect(page.getByText('Ekspor selesai', { exact: true })).toHaveCount(
+      0,
+    );
+    await openExport();
+    await expect(idReviewed).not.toBeChecked();
+    await idReviewed.check();
+    await idDialog.getByRole('button', { name: 'Ekspor', exact: true }).click();
+    await expect(idDialog.getByRole('status')).toContainText(
+      'Mengekspor data yang ditinjau',
+    );
+    await finishExport(success);
+    await expect(idDialog.getByRole('status')).toContainText('Ekspor selesai');
+    await expect(idDialog).toContainText('Temuan: 2');
+    await expect(idDialog).toContainText('Bukti: 1');
+    await expect(idDialog).toContainText('Sesi: 1');
+    await expect(idDialog).toContainText('Keputusan AI: 3');
+    await expect(
+      idDialog.getByRole('textbox', { name: 'Lokasi ekspor' }),
+    ).toHaveValue(success.value.directory);
+    await expect(
+      idDialog.getByRole('textbox', { name: 'Lokasi ekspor' }),
+    ).toHaveAttribute('readonly');
+    const calls = await fixture.calls();
+    expect(
+      calls.filter((call) => call.channel === 'pronoia:export-now'),
+    ).toEqual([
+      { channel: 'pronoia:export-now', input: { reviewed: true } },
+      { channel: 'pronoia:export-now', input: { reviewed: true } },
+      { channel: 'pronoia:export-now', input: { reviewed: true } },
+    ]);
+    expect(
+      calls.some((call) =>
+        [
+          'pronoia:snapshot',
+          'pronoia:audio',
+          'pronoia:pcm',
+          'pronoia:open',
+        ].includes(call.channel),
+      ),
+    ).toBe(false);
+  } finally {
+    await fixture.close();
+  }
+});
 
 test('real IPC refuses start B during recap A publication preflight and preserves A metadata', async () => {
   const fixture = await syntheticDesktop(true, 'none', true);

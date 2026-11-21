@@ -24,7 +24,7 @@ jobs:
       - name: Report disabled optional Project integration
         if: env.PRONOIA_PROJECT_TOKEN == ''
         run: echo 'Projects skipped; the separate PRONOIA_PROJECT_TOKEN is not configured.' >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.PRONOIA_PROJECT_TOKEN != ''
         with:
           ref: main

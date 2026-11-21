@@ -19,7 +19,7 @@ jobs:
     outputs:
       matrix: ${{ steps.targets.outputs.matrix }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           persist-credentials: false
@@ -60,7 +60,7 @@ jobs:
       contents: read
       security-events: write # Optional own-repository SARIF upload, not board status.
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           persist-credentials: false
@@ -76,7 +76,7 @@ jobs:
           permission-contents: read
           permission-metadata: read
       - name: Read target sources only (no install/build/runtime)
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ matrix.repo }}
           token: ${{ secrets.PRONOIA_TARGET_TOKEN || secrets.PRONOIA_SCAN_TOKEN || steps.read-app.outputs.token || (matrix.allow_board_token && secrets.GITHUB_TOKEN) }}
@@ -144,7 +144,7 @@ jobs:
       issues: write
       actions: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           persist-credentials: false

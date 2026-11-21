@@ -327,6 +327,35 @@ it('reuses an identical screenshot captured in the same second without a failed 
   }
 });
 
+it('preserves the original capture timestamp and recovers evidence retries without duplicate comments', async () => {
+  const f = fixture();
+  const authenticated = await f.board.api.rest.users.getAuthenticated();
+  vi.spyOn(f.board.api.rest.users, 'getAuthenticated').mockResolvedValue({
+    ...authenticated,
+    data: { ...authenticated.data, login: 'github-actions[bot]', type: 'Bot' },
+  });
+  const capturedAt = '2026-11-20T12:00:00Z';
+  const details = {
+    ...reviewed,
+    capturedAt,
+    session: 'synthetic-session',
+    step: 'Confirm MFA challenge',
+  };
+  const first = await f.board.addEvidence(1, pixel, details);
+  const second = await f.board.addEvidence(1, pixel, details);
+  expect(first.captured_at).toBe(capturedAt);
+  expect(second.file).toBe(first.file);
+  expect(
+    f.posted.filter((body) => body.includes('pronoia:evidence')),
+  ).toHaveLength(1);
+  await expect(
+    f.board.addEvidence(1, pixel, {
+      ...details,
+      capturedAt: 'not-a-timestamp',
+    }),
+  ).rejects.toThrow();
+});
+
 it('checks linked PR authors and closes only after a different human approves with evidence', async () => {
   const f = fixture();
   f.command('/start', 'worker');

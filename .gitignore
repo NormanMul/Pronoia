@@ -16,3 +16,6 @@ exports/
 *.p12
 .worktrees/
 .DS_Store
+test-results/
+playwright-report/
+**/e2e/.synthetic-*/

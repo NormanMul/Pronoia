@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { OpenAIRealtimeWS } from 'openai/realtime/ws';
+import OpenAI from 'openai';
 import { beforeAll, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { configSchema } from '../config.js';
@@ -35,12 +36,27 @@ const environment = {
   FOUNDRY_REALTIME_TRANSCRIBE_DEPLOYMENT: 'configured-realtime',
 };
 
+it('uses a statically supplied SDK constructor without changing the shared client configuration', () => {
+  const configured = foundryConfig(environment);
+  if (!configured.ok) throw new Error('Invalid synthetic configuration');
+  class BundledClient extends OpenAI {}
+  const client = createFoundryClient(configured.value, {
+    clientClass: BundledClient,
+  });
+  expect(client).toBeInstanceOf(BundledClient);
+  expect(client.baseURL).toBe(
+    'https://pronoia-demo.openai.azure.com/openai/v1/',
+  );
+  expect(client.timeout).toBe(15000);
+});
+
 function service(outputs: unknown[], override?: typeof fetch) {
-  const requests: { url: string; body: unknown }[] = [];
+  const requests: { url: string; body: unknown; headers: Headers }[] = [];
   const fetcher: typeof fetch = async (input, init) => {
     if (String(input) === 'data:,') return new Response('');
     requests.push({
       url: String(input),
+      headers: new Headers(init?.headers),
       body: typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body,
     });
     const value = outputs.shift();
@@ -84,6 +100,21 @@ function service(outputs: unknown[], override?: typeof fetch) {
     requests,
   };
 }
+
+it('routes batch audio to the documented deployment API while preserving secure key headers', async () => {
+  const fixture = service([{ text: 'Synthetic Contoso audio.' }]);
+  const bytes = new Uint8Array(16);
+  bytes.set([0x1a, 0x45, 0xdf, 0xa3]);
+  const result = await fixture.service.transcribe(bytes, 'en');
+  expect(result.ok).toBe(true);
+  expect(fixture.requests[0]?.url).toBe(
+    'https://pronoia-demo.openai.azure.com/openai/deployments/configured-transcribe/audio/transcriptions?api-version=2024-10-21',
+  );
+  expect(fixture.requests[0]?.headers.get('api-key')).toBe(
+    'test-only-noncredential',
+  );
+  expect(fixture.requests[0]?.headers.has('authorization')).toBe(false);
+});
 
 beforeAll(() => {
   service([]);

@@ -8,7 +8,8 @@ the authoritative assessment board and comment commands provide the audit trail.
 M0–M2 provide the governed board, recoverable comment commands, validated native
 alerts/SARIF, cached enrichment and SLAs, direct Foundry role/audio adapters and
 reviewable AI/Copilot integrations. Live Foundry credentials/deployments are
-configured separately. Desktop capture, UI and reporting remain later milestones.
+configured separately. The desktop co-pilot is described below; full reporting,
+Cowork/MCP integrations and Power BI remain later milestones.
 
 | Milestone | Deliverable                                                   |
 | --------- | ------------------------------------------------------------- |
@@ -84,6 +85,25 @@ See [security and AI integration](docs/security-and-ai.md) for workflows, token
 permissions, exact dismissal enums, privacy/expiry behavior and the public
 main-process Foundry API. The [vulnerable fixture](samples/vuln-app/README.md) must
 never be deployed or run in a shared environment.
+
+## Desktop co-pilot
+
+```sh
+npm ci
+npm run build
+npm run desktop
+```
+
+`npm run make` produces an unsigned portable ZIP. In encrypted Settings, configure
+the Foundry endpoint and your vision/transcription deployments, or use screen-only
+evidence without audio. Copy the meeting notice, obtain participant and cloud
+consent, select the assessment/items/source, then start. Pause/Stop remain visible
+in review dialogs; AI never signs off.
+
+The English/Bahasa UI includes presenter/compact views, live captions, proposals,
+in-app evidence and audit trails, per-step remediation evidence and human dispute
+dialogs. Publication retries restore stopped, reviewed work rather than recapture.
+See [desktop operation and limits](docs/desktop.md).
 
 ## Safety
 

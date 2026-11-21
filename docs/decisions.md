@@ -113,3 +113,113 @@ false`. Only `github-actions[bot]` may author authoritative audit/result
 - Recovery: transition journal first, idempotent proposal/assignment receipts,
   persisted assignees, then reconciliation/reaction and completion. Source
   observations and merge receipts never replace live PR/alert verification.
+
+## ADR 012: Desktop privacy takes precedence over unattended image uploads
+
+- Status: accepted implementation default, 2026-11-20.
+- Decision: a capture hotkey or meaningful auto-watch change queues a local
+  screenshot for review. A human paints opaque redactions, edits the transcript
+  excerpt and explicitly sends it to Foundry. Auto-watch never silently uploads
+  changing screen content. Pronoia windows remain visible during capture.
+- Reason: mandatory transparency, consent and pre-upload redaction override
+  the competing request to hide the overlay briefly or analyse every changed
+  frame without per-frame review. Choose the meeting window instead of the
+  entire screen to avoid recursive overlay content.
+
+## ADR 013: Forge 8 template and Windows packaging
+
+- Status: accepted implementation default, 2026-11-20.
+- Decision: Forge 8 uses `--template vite --typescript`; the old combined
+  template name was rejected by the installed CLI. Keep the requested React,
+  Fluent UI, ESLint/Prettier and Vitest stack, removing unused generated Linux
+  installers, Squirrel startup and Oxlint/Oxfmt configuration. Portable ZIPs
+  are unsigned. Package directly to output (`tmpdir: false`) because the final
+  temporary-directory rename failed on this Windows profile path.
+- Reason: these are platform/tool compatibility changes, not additional app
+  features. The real Electron consent smoke test now launches successfully.
+
+## ADR 014: Latest accessible stable Electron
+
+- Status: environment limitation, 2026-11-20.
+- Decision: use stable Electron 45.3.1, the latest stable package available in
+  the configured npm feed. Upstream GitHub reports 45.4.1, but the feed returns
+  404 for it and direct/alternative npm registries fail TLS. Do not silently
+  mix one npm version with a different downloaded runtime binary.
+- Risk: refresh the approved package feed and upgrade to the upstream stable
+  patch before a production engagement.
+- Rechecked 2026-11-21: GitHub's stable release remains 45.4.1 and the feed
+  still returns 404 for that version. Its `latest` tag points to 46.0.0-alpha.10;
+  do not substitute that prerelease for the verified stable build.
+
+## ADR 015: Explicit Electron test environment
+
+- Status: accepted, 2026-11-20.
+- Decision: remove `ELECTRON_RUN_AS_NODE` entirely from smoke-test environments
+  and normalize the Windows application path before launching Playwright.
+- Reason: an empty-but-present variable still selected Node mode; a trailing
+  directory separator caused a failed launch. Tests must verify the real
+  consent UI, not merely a successful process start.
+
+## ADR 016: Capture cancellation and bounded realtime readiness
+
+- Status: accepted, 2026-11-20.
+- Decision: propagate cancellation through asynchronous media permissions and
+  AudioWorklet setup. Late-acquired tracks are stopped and never uploaded.
+  Buffer PCM16 in memory until transcription configuration is acknowledged;
+  each source is limited to 2 MiB and failed sends remain queued for retry.
+  Reconnect/fallback warns that uncommitted audio may be missing. No audio
+  buffer is written to disk.
+- Privacy: camera access is denied; permission checks and requests both require
+  the consented main frame. Proposal previews use the reviewed/redacted image,
+  never its original capture. Auto-watch compares small frames before retaining
+  a full-resolution capture and never replaces an open human review.
+- Accessibility: use Fluent UI's focus-trapped dialogs with Escape/return-focus
+  behavior, and offer a keyboard-accessible full-image redaction action.
+
+## ADR 017: Durable reviewed publication and capture generations
+
+- Status: accepted, 2026-11-21.
+- Decision: journal immutable human-reviewed intent locally before publishing.
+  Retry against the same repository/actor and existing comment/file receipts,
+  preserving capture time and hashes. Interrupted proposal outcomes remain
+  recoverable; CSV projection never replaces other local outcomes.
+- Privacy: reopening restores stopped review work, never capture or consent.
+  A new media nonce on Pause/resume/Stop rejects stale queued audio. Model and
+  screenshot operations retain their original cancellation signal. Changing
+  settings archives the previous session and requires fresh consent.
+- The display video grant stays alive for system loopback, but only audio
+  tracks enter MediaRecorder. Stop ends every track. Rate is verified at 24 kHz
+  before realtime PCM starts; recorder/device errors stop capture explicitly.
+- Shared core configuration retains the mandatory governance policy. YAML is
+  already part of the approved stack; the desktop declares it directly because
+  the packaged application must read configuration without depending on the CLI.
+- Token reservations and reported usage bound new requests. Unknown batch
+  usage uses byte-based estimates; realtime commits use 100 estimated token
+  units per source. These controls are not a hard cloud invoice cap.
+
+## ADR 018: Standalone packaged model dependencies
+
+- Status: accepted, 2026-11-21.
+- Decision: preserve the ordinary npm workspace layout. Statically supply the
+  approved SDK constructor/token provider from the desktop to the shared client
+  factory, while CLI SDK loading remains lazy. Rolldown's Node platform provides
+  native CommonJS builtin resolution in ESM output; Forge packages Vite output
+  only. Native File supplies finalized audio uploads without a dynamic SDK require.
+- A small synchronous CJS bootstrap initializes userData/sessionData and the
+  single-instance lock before asynchronously loading the SDK-bearing ESM module.
+- Reason: the initial hoisted ASAR omitted lazy SDK dependencies. A nested
+  installation experiment exhausted the host heap and was abandoned, not shipped.
+  Static bundling plus Node-platform output passed an actual copied executable
+  test outside the workspace, with capture denied before consent.
+
+## ADR 019: Verified Azure batch-audio protocol
+
+- Status: accepted, 2026-11-21.
+- Decision: keep Responses and realtime on v1. Batch transcription uses the
+  documented deployment-scoped `2024-10-21` audio API, with the same Entra client
+  or explicit Azure `api-key` header. Unsupported v1 audio returned
+  DeploymentNotFound despite a successful deployment; no output was trusted.
+- Evidence: synthetic speech generated without a microphone/speaker, encoded by
+  the actual Electron MediaRecorder, transcribed by a live Entra-authenticated
+  deployment. Batch and PCM24k realtime both recognized all eight expected
+  vocabulary terms. Other model deployments and assessment statuses were unchanged.

@@ -247,11 +247,15 @@ pass|fail|unclear|n/a`, `proposed_command: /start|/validate|/block|/confirm|none
   Role/audio operations have a combined 45-second deadline; realtime credential/
   handshake work has 15 seconds. Stop/Private also closes the realtime socket.
 - Batch transcription uploads the **whole finalized WebM file** using
-  `toFile(bytes, 'chunk.webm')`, max 25 MiB, optional ISO-639-1 language. Do not
+  native `File`, max 25 MiB, optional ISO-639-1 language. Do not
   pass arbitrary byte fragments/PCM or infer container completeness from a
   chunk boundary. A fixed security-vocabulary prompt covers MFA, Entra ID, CVE,
   CVSS, EPSS, KEV, SARIF and related terms without inventing speech. No audio is
-  persisted.
+  persisted. Azure batch audio uses the documented deployment-scoped endpoint
+  `/openai/deployments/<deployment>/audio/transcriptions?api-version=2024-10-21`.
+  The v1 audio route returned DeploymentNotFound during real synthetic testing;
+  the documented route passed with Entra ID. Explicit key mode uses `api-key`,
+  not a bearer key. No failure is silently treated as a transcript.
 - Realtime handle: `{connection: OpenAIRealtimeWS, transcription_model: string}`.
   The factory resolves auth and returns a connecting Node socket; wait for
   socket open, configure the transcription session using that deployment and
@@ -260,7 +264,8 @@ pass|fail|unclear|n/a`, `proposed_command: /start|/validate|/block|/confirm|none
 
 Endpoint must be HTTPS on an Azure OpenAI/Cognitive Services resource, or
 `https://<resource>.services.ai.azure.com/api/projects/<project>`. The base URL is
-endpoint trimmed of trailing slashes + `/openai/v1/`; no dated api-version.
+endpoint trimmed of trailing slashes + `/openai/v1/` for Responses/realtime;
+batch audio is the documented deployment-scoped exception above.
 `FOUNDRY_CHAT_DEPLOYMENT`, `FOUNDRY_TRANSCRIBE_DEPLOYMENT` and
 `FOUNDRY_REALTIME_TRANSCRIBE_DEPLOYMENT` are deployment names, never catalog IDs.
 Authentication defaults to managed identity even if a fallback API key exists:

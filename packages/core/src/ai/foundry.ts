@@ -133,11 +133,17 @@ export function foundryConfig(
 
 export function createFoundryClient(
   input: FoundryConfig,
-  options: { fetch?: typeof fetch; tokenProvider?: () => Promise<string> } = {},
+  options: {
+    fetch?: typeof fetch;
+    tokenProvider?: () => Promise<string>;
+    clientClass?: typeof import('openai').default;
+  } = {},
 ): OpenAI {
   const config = foundryConfigSchema.parse(input);
   // Load model SDKs only on use so ordinary board commands keep their M1 startup cost.
-  const { default: Client } = require('openai') as typeof import('openai');
+  const Client =
+    options.clientClass ??
+    (require('openai') as typeof import('openai')).default;
   let apiKey: string | (() => Promise<string>);
   if (config.auth.mode === 'key') apiKey = config.auth.apiKey;
   else if (options.tokenProvider) apiKey = options.tokenProvider;
@@ -539,15 +545,34 @@ export class FoundryService {
       (language !== undefined && !/^[a-z]{2}$/.test(language))
     )
       return failure('input');
-    const { toFile } = require('openai') as typeof import('openai');
-    const file = toFile(bytes, 'chunk.webm', { type: 'audio/webm' });
+    const file = new File([new Uint8Array(bytes)], 'chunk.webm', {
+      type: 'audio/webm',
+    });
+    const endpoint = new URL(this.config.endpoint);
+    const resourceHost = endpoint.hostname.replace(
+      /\.(?:services\.ai|cognitiveservices)\.azure\.com$/,
+      '.openai.azure.com',
+    );
+    // Azure's v1 surface does not expose batch transcription; use its documented deployment API.
+    const audio = this.client.withOptions({
+      baseURL: `https://${resourceHost}/openai/deployments/${this.config.transcribeDeployment}/`,
+      defaultQuery: { 'api-version': '2024-10-21' },
+      ...(this.config.auth.mode === 'key'
+        ? {
+            defaultHeaders: {
+              'api-key': this.config.auth.apiKey,
+              Authorization: null,
+            },
+          }
+        : {}),
+    });
     return validatedOutput(
       transcriptionSchema,
       async (_repair, signal) => {
-        const response = await this.client.audio.transcriptions.create(
+        const response = await audio.audio.transcriptions.create(
           {
             model: this.config.transcribeDeployment ?? '',
-            file: await withSignal(file, signal),
+            file,
             response_format: 'json',
             prompt: transcriptionPrompt,
             ...(language ? { language } : {}),

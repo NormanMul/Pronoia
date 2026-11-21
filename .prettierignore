@@ -6,6 +6,7 @@ coverage
 .vite
 .pronoia-scan
 .pronoia-cache
+**/e2e/.synthetic-*/
 exports
 *.csv
 *.tmdl

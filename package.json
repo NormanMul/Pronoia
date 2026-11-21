@@ -13,16 +13,20 @@
   "scripts": {
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
-    "pretest": "npm run build",
-    "pretest:coverage": "npm run build",
-    "typecheck": "npm run build -w @pronoia/core && tsc --noEmit",
+    "pretest": "npm run build -w @pronoia/core && npm run build -w @pronoia/cli",
+    "pretest:coverage": "npm run build -w @pronoia/core && npm run build -w @pronoia/cli",
+    "typecheck": "npm run build -w @pronoia/core && tsc --noEmit && npm run typecheck -w @pronoia/desktop",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "build": "npm run build -w @pronoia/core && npm run build -w @pronoia/cli",
+    "build": "npm run build -w @pronoia/core && npm run build -w @pronoia/cli && npm run build -w @pronoia/desktop",
     "pronoia": "node packages/cli/dist/index.js",
-    "demo:seed": "node packages/cli/dist/index.js demo-seed"
+    "demo:seed": "node packages/cli/dist/index.js demo-seed",
+    "test:desktop": "playwright test --config playwright.config.ts",
+    "desktop": "npm run build -w @pronoia/core && npm run start -w @pronoia/desktop",
+    "make": "npm run build -w @pronoia/core && npm run make -w @pronoia/desktop"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.0",
     "@eslint/js": "9.39.5",
     "@types/node": "22.20.5",
     "@types/ws": "8.18.2",

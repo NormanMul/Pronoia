@@ -351,6 +351,7 @@ export class Board {
       step?: string;
       reviewed: boolean;
       synthetic: boolean;
+      capturedAt?: string;
     },
     agent?: string,
   ): Promise<z.infer<typeof evidenceSchema>> {
@@ -365,7 +366,9 @@ export class Board {
     if (!issue.labels.includes('pronoia') || issue.pull_request) {
       throw new Error('Evidence must belong to a Pronoia issue.');
     }
-    const captured_at = new Date().toISOString();
+    const captured_at = evidenceSchema.shape.captured_at.parse(
+      details.capturedAt ?? new Date().toISOString(),
+    );
     const file = evidencePath(number, png, captured_at);
     const user = userSchema.parse(
       (await this.api.rest.users.getAuthenticated()).data,
@@ -443,6 +446,16 @@ export class Board {
     const wib = new Date(captured_at).toLocaleString('en-GB', {
       timeZone: 'Asia/Jakarta',
     });
+    const existingComment = (await this.comments(number)).some((comment) => {
+      if (comment.user?.login.toLowerCase() !== user.login.toLowerCase())
+        return false;
+      if ((parseAgentMarker(comment.body) ?? undefined) !== agent) return false;
+      const match = /<!-- pronoia:evidence (.*?) -->/s.exec(comment.body);
+      if (!match?.[1]) return false;
+      const candidate = evidenceSchema.parse(JSON.parse(match[1]));
+      return JSON.stringify(candidate) === JSON.stringify(meta);
+    });
+    if (existingComment) return meta;
     await this.comment(
       number,
       [
